@@ -18,3 +18,10 @@ local.properties
 #intellij project files
 *.iml
 *.idea
+
+# ai-bridge (nokpixel-ai-observer)
+.env
+__pycache__/
+*.pyc
+.venv/
+ai-bridge/logs/

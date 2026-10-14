@@ -47,6 +47,10 @@ import java.util.Locale;
 
 public class DesktopLauncher {
 
+	// [nokpixel-ai-watcher] AI 관찰용 고정 창 크기
+	public static final int AI_WINDOW_WIDTH = 720;
+	public static final int AI_WINDOW_HEIGHT = 400;
+
 	public static void main (String[] args) {
 
 		if (!DesktopLaunchValidator.verifyValidJVMState(args)){
@@ -172,11 +176,17 @@ public class DesktopLauncher {
 		SPDSettings.set( new Lwjgl3Preferences( new Lwjgl3FileHandle(basePath + SPDSettings.DEFAULT_PREFS_FILE, baseFileType) ));
 		FileUtils.setDefaultFileProperties( baseFileType, basePath );
 		
-		config.setWindowSizeLimits( 720, 400, -1, -1 );
-		Point p = SPDSettings.windowResolution();
-		config.setWindowedMode( p.x, p.y );
+		// [nokpixel-ai-watcher] AI 관찰용: 창 크기를 720x400으로 고정한다.
+		// AI에게 보내는 스크린샷 크기(=토큰 비용)를 일정하게 유지하기 위함.
+		// 720x400은 게임이 허용하는 최소 크기이며, 이때 화면은 2배 확대로 그려진다.
+		SPDSettings.fullscreen( false );
+		SPDSettings.windowMaximized( false );
+		SPDSettings.windowResolution( new Point( AI_WINDOW_WIDTH, AI_WINDOW_HEIGHT ) );
+		config.setWindowSizeLimits( AI_WINDOW_WIDTH, AI_WINDOW_HEIGHT, AI_WINDOW_WIDTH, AI_WINDOW_HEIGHT );
+		config.setWindowedMode( AI_WINDOW_WIDTH, AI_WINDOW_HEIGHT );
+		config.setResizable( false );
 
-		config.setMaximized(SPDSettings.windowMaximized());
+		config.setMaximized( false );
 
 		//going fullscreen on launch is a bit buggy
 		// so game always starts windowed and then switches in DesktopPlatformSupport.updateSystemUI

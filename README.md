@@ -110,6 +110,10 @@ AI가 쓴 생각·메모는 다음 판단의 입력으로 다시 들어갑니다
 - **큰 점검**: 10번째 판단마다, 중간 목표를 바꾼 다음 판단에 "최종 목표에 가까워졌나, 중간 목표가 맞나, 틀린 메모는 없나"를 생각에 쓰게 합니다.
 - 근거가 추측인 판단과 메모를 지운 순간은 리포트에 따로 표시합니다. 막는 것만이 아니라 **관찰 데이터**이기 때문입니다.
 
+### 결과를 세밀하게: 진행도 이정표 (예정)
+"보스 처치 O/X + 도달 층"만으로는 판끼리 차이가 거칠어서, 1~5층 이정표(첫 처치 → 층 도착 → 장비 강화 → 보스전 → 구 처치)에 단계별 점수를 매깁니다. OpenAI VPT 논문의 단계별 보상표를 **학습이 아니라 평가용**으로 빌려 왔습니다. AI에게는 알려주지 않습니다.
+자세한 내용: [docs/project/progress-milestones.md](docs/project/progress-milestones.md)
+
 ### 판을 넘어가는 교훈: 꺼내 쓰기를 넘어서
 판이 끝나면 AI가 **다음 판의 자신에게 남기는 교훈**을 직접 씁니다 (`lessons.md`, 각 줄에 근거 판단 번호). 다음 판 설정에서 그 교훈을 이어받을 수 있습니다. 원래 알던 지식이 아니라 **스스로 겪어서 만든 지식**으로 판단이 바뀌는지를 봅니다.
 
@@ -215,6 +219,7 @@ python web.py            # 실제 실행 (Windows, Claude API 키 필요)
 |---|---|
 | [Claude Plays Pokémon](https://github.com/davidhershey/ClaudePlaysPokemonStarter) | 짧은 규칙, 생각은 글로·행동은 도구로, 기록 요약 |
 | [Gemini Plays Pokémon](https://blog.jcz.dev/the-making-of-gemini-plays-pokemon) | 관찰 화면 설계, 개발자 개입, 단순하게 시작해 기능 추가 |
+| [VPT (OpenAI, 2022)](https://arxiv.org/abs/2206.11795) | 단계별 보상표 → 진행도 이정표(평가용), "지시보다 학습된 습관을 따른다"는 선행 결과 |
 | [Voyager](https://voyager.minedojo.org/) | AI가 스스로 목표를 세우고 쪼개는 방식 |
 | [Ghost in the Minecraft](https://arxiv.org/abs/2305.17144) | 공략(위키) 텍스트를 AI에 제공하는 실험 |
 | [BALROG](https://arxiv.org/abs/2411.13543) | 게임을 텍스트로 바꿔 AI 평가, "아는 것과 하는 것의 차이" |

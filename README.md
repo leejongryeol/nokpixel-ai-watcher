@@ -22,7 +22,7 @@
 | 경로 | 내용 |
 |---|---|
 | `core/`, `desktop/`, `SPD-classes/` … | 녹픽던 원본 게임 코드 (Java, v4.0.2 기준) |
-| `ai-bridge/` | **새로 추가**: 게임과 AI를 연결하는 프로그램 (Python) |
+| `ai-bridge/` | **새로 추가**: AI 플레이어 + 관찰 웹 화면 (Python). 데모: `python web.py --demo` |
 | `docs/project/` | **새로 추가**: 시스템 구조, 판단 순간·숨길 정보 표 등 설계 문서 |
 | `docs/getting-started-*.md` | 원본 게임 빌드 안내 (원작자 작성) |
 

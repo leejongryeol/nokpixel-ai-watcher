@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>관찰 화면 · 녹픽셀 AI 감시자</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&family=Nanum+Gothic+Coding:wght@400;700&display=swap">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  body { display: flex; flex-direction: column; min-height: 100%; }
+  .main { flex: 1; display: grid; grid-template-columns: minmax(320px, 440px) minmax(0, 720px) minmax(280px, 1fr); gap: 16px; padding: 16px 24px; min-height: 0; }
+  .col { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
+  .head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .thoughts { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; overflow: hidden; min-height: 200px; }
+  .screen { position: relative; width: 100%; aspect-ratio: 720 / 400; max-width: 720px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #000; }
+  .screen img { width: 100%; height: 100%; object-fit: contain; display: block; image-rendering: pixelated; }
+  .screen .label { position: absolute; left: 12px; top: 12px; padding: 6px 10px; border-radius: 6px; background: rgba(22,20,15,0.88); font-size: 12px; font-weight: 700; color: var(--accent); }
+  .bubble { position: absolute; left: 50%; top: 14%; transform: translateX(-10%); max-width: 46%; padding: 10px 12px; background: #fdf8ec; color: #1c1914; border-radius: 10px; font-size: 14px; font-weight: 700; line-height: 1.45; box-shadow: 0 6px 16px rgba(0,0,0,0.45); }
+  .bubble::after { content: ""; position: absolute; left: 18px; bottom: -8px; width: 16px; height: 16px; background: #fdf8ec; transform: rotate(45deg); }
+  .below { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 12px; flex: 1; min-height: 0; }
+  pre.sent { margin: 0; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.55; color: #d9d1bf; white-space: pre-wrap; overflow: auto; max-height: 220px; }
+  .goal-row { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 8px; font-size: 14px; align-items: baseline; }
+  .goal-row .k { font-size: 12px; color: var(--muted); }
+  .goal-row.now { background: var(--accent-soft); border-radius: 6px; padding: 6px 8px; margin: 0 -8px; }
+  .goal-row.now .k { color: var(--accent); font-weight: 700; }
+  .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .stat .v { font-size: 18px; font-weight: 700; font-family: var(--font-mono); }
+  .bar { margin-top: 6px; height: 6px; border-radius: 3px; background: var(--line); }
+  .bar div { height: 6px; border-radius: 3px; background: var(--accent); }
+  .memo { flex: 1; overflow: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.55; display: flex; flex-direction: column; gap: 4px; }
+  .memo .new { padding: 2px 6px; border-radius: 4px; background: var(--teal-bg); color: #d9f5ef; }
+  .hintform { display: flex; flex-direction: column; gap: 6px; }
+  .hintform label { font-size: 12px; color: var(--purple); font-weight: 700; }
+  .hintform .row { display: flex; gap: 8px; }
+  .hintform input { flex: 1; height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-deep); color: var(--text); font-size: 14px; }
+  .hintform button { height: 44px; padding: 0 16px; border-radius: 8px; border: none; background: var(--purple-btn); color: #fff; font-weight: 700; font-size: 14px; cursor: pointer; }
+  .placeholder { border: 1px dashed var(--line); border-radius: 8px; padding: 14px; color: var(--muted); font-size: 12.5px; line-height: 1.5; text-align: center; }
+  @media (max-width: 1200px) { .main { grid-template-columns: 1fr; } .thoughts { max-height: 420px; } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">녹픽셀 AI 감시자</div>
+  <div id="chips" class="chips"></div>
+  <div class="meter"><span class="muted">토큰</span><b id="tokens">0</b></div>
+  <div class="meter"><span class="muted">비용</span><b id="cost" style="color: var(--accent)">$0.000</b></div>
+  <div id="status" class="status none">실험 없음</div>
+  <button id="stop" class="btn danger" type="button">중지</button>
+  <a id="report-link" class="btn" href="/report">리포트</a>
+</header>
+
+<div id="no-run" class="hidden" style="padding: 48px 24px; text-align: center">
+  <p style="font-size: 18px">진행 중인 실험이 없어요.</p>
+  <a class="btn primary" href="/">실험 설정으로 가기</a>
+</div>
+
+<main id="main" class="main">
+  <section class="col">
+    <div class="head"><h2 class="section">AI의 생각</h2><span id="stepinfo" class="muted mono" style="font-size: 12px"></span></div>
+    <div id="thoughts" class="thoughts"><div class="empty">AI가 첫 판단을 하는 중이에요…</div></div>
+    <div id="error" class="notice error hidden" role="alert"></div>
+    <form id="hintform" class="hintform panel">
+      <label for="hint">개발자 개입 · 다음 판단 때 AI에게 전달</label>
+      <div class="row">
+        <input id="hint" type="text" placeholder="힌트를 입력하세요 (조종은 불가)" autocomplete="off">
+        <button type="submit">전달</button>
+      </div>
+      <span id="hint-pending" class="help" style="font-size: 12px"></span>
+    </form>
+  </section>
+
+  <section class="col">
+    <div class="head"><h2 class="section">게임 화면</h2><span class="muted mono" style="font-size: 12px">720 × 400 · AI가 본 그대로</span></div>
+    <div class="screen">
+      <img id="shot" alt="AI가 마지막으로 본 게임 화면">
+      <div id="shot-label" class="label">대기 중</div>
+      <div id="bubble" class="bubble hidden"></div>
+    </div>
+    <div class="below">
+      <div class="panel">
+        <p class="panel-title">안개 미니맵 · AI가 아는 칸만</p>
+        <div class="placeholder">게임 코드 연결 후 표시<br>(7주차 작업)</div>
+      </div>
+      <div class="panel" style="min-width: 0">
+        <p class="panel-title">AI가 함께 받은 글 정보</p>
+        <pre id="sent" class="sent">(첫 판단 전)</pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="col">
+    <div class="panel">
+      <p class="panel-title">목표</p>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <div class="goal-row"><span class="k">최종</span><b>🏆 5층 보스 "구" 처치</b></div>
+        <div class="goal-row now"><span class="k">중간</span><b id="goal">🗺️ (아직 없음)</b></div>
+        <div class="goal-row"><span class="k">실행</span><span id="action">🎮 -</span></div>
+      </div>
+      <p id="goal-change" class="muted" style="font-size: 12px; margin: 8px 0 0"></p>
+    </div>
+    <div class="stats">
+      <div class="panel stat"><div class="panel-title" style="margin: 0">판단</div><div class="v" id="progress">0 / 0</div><div class="bar"><div id="progress-bar" style="width: 0%"></div></div></div>
+      <div class="panel stat"><div class="panel-title" style="margin: 0">중간 목표 변경</div><div class="v" id="goal-count">0회</div></div>
+      <div class="panel stat"><div class="panel-title" style="margin: 0">체력 · 층</div><div class="muted" style="font-size: 12px; margin-top: 4px">게임 코드 연결 후 표시</div></div>
+      <div class="panel stat"><div class="panel-title" style="margin: 0">개발자 개입</div><div class="v" id="hint-count">0회</div></div>
+    </div>
+    <div class="panel" style="flex: 1; display: flex; flex-direction: column; min-height: 160px">
+      <div style="display: flex; justify-content: space-between; align-items: center"><p class="panel-title" style="margin: 0">기억 메모 · AI가 직접 씀</p><span id="memo-new" class="tag memo hidden">방금 추가</span></div>
+      <div id="memo" class="memo" style="margin-top: 8px"><div class="empty">아직 적은 교훈이 없어요.</div></div>
+    </div>
+  </section>
+</main>
+
+<script src="/static/common.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+let lastStep = -1;
+let allEntries = [];
+
+function thoughtCard(entry, isLatest, isOld) {
+  const kinds = entryKinds(entry);
+  return el("div", { class: "card" + (isLatest ? " latest" : "") + (isOld ? " old" : "") },
+    el("div", { class: "meta" },
+      el("span", { class: "tag cmd", text: `판단 ${entry.step}` }),
+      kinds.map((k) => el("span", { class: "tag " + k, text: KIND_LABEL[k] })),
+      entry.goal ? el("span", { text: "목표: " + entry.goal }) : null),
+    el("div", { class: "body", text: entry.thought || "(생각 없음)" }),
+    el("div", { class: "act" }, "→ ", el("b", { text: entry.action_text })),
+    entry.memo_add ? el("div", { class: "act", style: "color: var(--teal)", text: "📝 " + entry.memo_add }) : null);
+}
+
+function hintCard(entry) {
+  return el("div", { class: "card hint" },
+    el("div", { class: "meta" }, el("span", { class: "tag hint", text: "개발자 개입" }), `판단 ${entry.step}에 전달`),
+    entry.hints.map((h) => el("div", { class: "body", text: `"${h}"` })));
+}
+
+function render(s) {
+  if (s.status === "none") {
+    $("no-run").classList.remove("hidden");
+    $("main").classList.add("hidden");
+    $("stop").disabled = true;
+    setStatus($("status"), "none");
+    return;
+  }
+  configChips($("chips"), s.config);
+  setStatus($("status"), s.status);
+  $("stop").disabled = s.status !== "running";
+  $("report-link").href = "/report?run=" + encodeURIComponent(s.run_id);
+  $("tokens").textContent = number(s.total_tokens);
+  $("cost").textContent = money(s.total_cost);
+  $("progress").textContent = `${s.step} / ${s.config.steps}`;
+  $("progress-bar").style.width = Math.min(100, (s.step / s.config.steps) * 100) + "%";
+  $("error").classList.toggle("hidden", s.status !== "error");
+  $("error").textContent = s.status === "error" ? "오류로 멈췄어요: " + s.error : "";
+  $("hint-pending").textContent = s.pending_hints.length ? `전달 대기: ${s.pending_hints.join(" / ")}` : "";
+
+  // 새 판단만 반영
+  const newest = s.entries[s.entries.length - 1];
+  if (!newest || newest.step === lastStep) return;
+  lastStep = newest.step;
+  allEntries = s.entries;
+
+  const recent = allEntries.slice(-6);
+  const cards = [];
+  recent.forEach((e, i) => {
+    if (e.hints && e.hints.length) cards.push(hintCard(e));
+    cards.push(thoughtCard(e, i === recent.length - 1, i < recent.length - 3));
+  });
+  $("thoughts").replaceChildren(...cards);
+  $("stepinfo").textContent = `판단 ${newest.step}번째 · ${newest.time.slice(11)}`;
+
+  $("shot").src = `/shots/${encodeURIComponent(s.run_id)}/${encodeURIComponent(newest.image)}`;
+  $("shot-label").textContent = `판단 ${newest.step} · ${newest.action_text}`;
+  $("bubble").textContent = newest.speech;
+  $("bubble").classList.toggle("hidden", !newest.speech);
+
+  $("goal").textContent = "🗺️ " + (s.goal || "(아직 없음)");
+  $("action").textContent = "🎮 " + newest.action_text;
+  const changes = allEntries.filter((e) => e.goal_changed);
+  $("goal-count").textContent = changes.length + "회";
+  const lastChange = changes[changes.length - 1];
+  $("goal-change").textContent = lastChange ? `마지막 변경 · 판단 ${lastChange.step}` : "";
+  $("hint-count").textContent = allEntries.filter((e) => e.hints && e.hints.length).length + "회";
+
+  const sent = [
+    "[최근 기록] 최근 판단 " + Math.min(5, allEntries.length - 1) + "개",
+    "[현재 중간 목표] " + (s.goal || "(아직 없음)"),
+    s.memo.length ? "[기억 메모]\n" + s.memo.map((m) => "- " + m).join("\n") : "[기억 메모] (없음)",
+    newest.hints && newest.hints.length ? "[개발자 힌트]\n" + newest.hints.map((h) => "- " + h).join("\n") : null,
+    "[현재 게임 화면] (이미지)",
+    "",
+    `토큰 · 입력 ${number(newest.input_tokens)} / 출력 ${number(newest.output_tokens)}`,
+  ].filter((x) => x !== null).join("\n");
+  $("sent").textContent = sent;
+
+  $("memo").replaceChildren(...(s.memo.length
+    ? s.memo.map((m, i) => el("div", { class: i === s.memo.length - 1 && newest.memo_add ? "new" : "", text: (i === s.memo.length - 1 && newest.memo_add ? "+ " : "- ") + m }))
+    : [el("div", { class: "empty", text: "아직 적은 교훈이 없어요." })]));
+  $("memo-new").classList.toggle("hidden", !newest.memo_add);
+}
+
+async function poll() {
+  try { render(await api("/api/state")); } catch (e) { /* 서버 재시작 중일 수 있음 */ }
+  setTimeout(poll, 1000);
+}
+
+$("hintform").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const text = $("hint").value.trim();
+  if (!text) return;
+  try {
+    await api("/api/hint", { method: "POST", body: { text } });
+    $("hint").value = "";
+    $("hint-pending").textContent = "전달 대기: " + text;
+  } catch (e) { $("hint-pending").textContent = e.message; }
+});
+
+$("stop").addEventListener("click", async () => {
+  $("stop").disabled = true;
+  await api("/api/stop", { method: "POST" }).catch(() => {});
+});
+
+poll();
+</script>
+</body>
+</html>

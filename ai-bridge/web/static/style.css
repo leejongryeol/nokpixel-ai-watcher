@@ -1,0 +1,94 @@
+/* 녹픽셀 AI 감시자 - 공통 스타일 (Claude Design 시안 기준) */
+:root {
+  --bg: #16140f;
+  --bar: #1c1914;
+  --panel: #211e18;
+  --panel-deep: #16140f;
+  --line: #3a342a;
+  --text: #ece6d8;
+  --text-soft: #c9c1ae;
+  --muted: #a89f8c;
+  --accent: #e0a44a;
+  --accent-soft: #2a2418;
+  --amber-bg: #4a3718; --amber: #f2c27a;
+  --teal-bg: #1d3d38;  --teal: #9fe0d4; --teal-line: #5fb3a6;
+  --blue-bg: #1d2f3d;  --blue: #9cc7e8;
+  --red-bg: #3b1f1c;   --red: #f0b0a6; --red-strong: #d4604f;
+  --purple-bg: #241f2e; --purple: #cbb8ee; --purple-btn: #6f5a99;
+  --font-display: 'Black Han Sans', 'IBM Plex Sans KR', sans-serif;
+  --font-body: 'IBM Plex Sans KR', system-ui, sans-serif;
+  --font-mono: 'Nanum Gothic Coding', ui-monospace, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-body); font-size: 14px; }
+a { color: var(--accent); }
+button, input, select { font-family: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.hidden { display: none !important; }
+
+/* 상단 바 */
+.topbar { height: 64px; padding: 0 24px; display: flex; align-items: center; gap: 18px; border-bottom: 1px solid var(--line); background: var(--bar); }
+.brand { font-family: var(--font-display); font-size: 24px; color: var(--accent); white-space: nowrap; }
+.chips { display: flex; gap: 8px; flex: 1; flex-wrap: wrap; font-size: 13px; min-width: 0; }
+.chip { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); white-space: nowrap; }
+.meter { display: flex; flex-direction: column; align-items: flex-end; font-family: var(--font-mono); font-size: 12px; }
+.meter b { font-size: 15px; }
+.status { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 6px; font-weight: 700; white-space: nowrap; }
+.status::before { content: ""; width: 8px; height: 8px; border-radius: 999px; background: currentColor; }
+.status.running { background: var(--red-bg); color: var(--red); }
+.status.finished { background: var(--teal-bg); color: var(--teal); }
+.status.stopped, .status.ready, .status.none { background: var(--panel); color: var(--text-soft); }
+.status.error { background: var(--red-bg); color: var(--red-strong); }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 14px; font-weight: 700; text-decoration: none; cursor: pointer; white-space: nowrap; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.btn.danger { color: var(--red); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.panel-title { font-size: 12px; color: var(--muted); margin: 0 0 8px; font-weight: 500; }
+h2.section { margin: 0; font-size: 18px; font-weight: 700; }
+
+/* 태그 */
+.tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+.tag.cmd { background: #2e2a22; color: var(--text-soft); }
+.tag.goal { background: var(--amber-bg); color: var(--amber); }
+.tag.memo { background: var(--teal-bg); color: var(--teal); }
+.tag.hint { background: var(--purple-bg); color: var(--purple); border: 1px dashed #8d77b8; }
+
+/* 생각 카드 */
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+.card.latest { background: #1f2624; border-color: var(--teal-line); }
+.card.old { opacity: 0.6; }
+.card.hint { background: var(--purple-bg); border: 1px dashed #8d77b8; }
+.card .meta { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.card .body { font-size: 14px; line-height: 1.55; }
+.card .act { font-size: 13px; }
+
+/* 입력 */
+.field { display: flex; flex-direction: column; gap: 8px; }
+.field > label, .field > .label { font-size: 14px; font-weight: 700; }
+.help { font-size: 13px; color: var(--muted); }
+.input { height: 48px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 16px; width: 100%; }
+.input.small { height: 40px; font-size: 15px; border-radius: 8px; }
+.seg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding: 4px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); }
+.seg label { display: flex; align-items: center; justify-content: center; gap: 6px; height: 40px; border-radius: 7px; font-size: 15px; color: var(--text-soft); cursor: pointer; }
+.seg label:has(input:checked) { background: var(--line); color: var(--text); font-weight: 700; }
+.seg label:has(input:disabled) { opacity: 0.45; cursor: not-allowed; }
+.seg input, .model-card input { accent-color: var(--accent); margin: 0; }
+.model-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.model-card { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
+.model-card:has(input:checked) { border: 2px solid var(--accent); background: var(--accent-soft); padding: 11px 13px; }
+.model-card .name { display: flex; gap: 8px; align-items: center; font-weight: 700; font-size: 15px; }
+.model-card .price { font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
+
+.notice { padding: 10px 14px; border-radius: 10px; font-size: 14px; line-height: 1.5; }
+.notice.error { background: var(--red-bg); color: var(--red); }
+.notice.info { background: var(--purple-bg); color: var(--purple); }
+
+.empty { color: var(--muted); font-size: 13px; line-height: 1.5; padding: 8px 0; }

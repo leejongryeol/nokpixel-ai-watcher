@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>관찰 리포트 · 녹픽셀 AI 감시자</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&family=Nanum+Gothic+Coding:wght@400;700&display=swap">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .main { padding: 16px 24px; display: flex; flex-direction: column; gap: 14px; }
+  .row1 { display: grid; grid-template-columns: minmax(260px, 420px) minmax(0, 1fr); gap: 12px; }
+  .result { padding: 16px 20px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+  .result .k { font-size: 12px; font-weight: 700; letter-spacing: 1px; color: var(--muted); }
+  .result .v { font-size: 22px; font-weight: 700; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .tile { padding: 14px 16px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); }
+  .tile .v { font-size: 26px; font-weight: 700; font-family: var(--font-mono); }
+  .tile .v small { font-size: 15px; color: var(--muted); }
+  .rewind { padding: 14px 18px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+  .rewind .top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .legend { display: flex; gap: 12px; font-size: 12px; color: var(--text-soft); flex: 1; flex-wrap: wrap; }
+  .ticks { display: flex; gap: 2px; align-items: flex-end; height: 44px; }
+  .tick { flex: 1 1 0; min-width: 2px; border: none; padding: 0; border-radius: 2px; cursor: pointer; opacity: 0.85; }
+  .tick:hover { opacity: 1; }
+  .tick.sel { outline: 2px solid #f5efe2; outline-offset: 2px; opacity: 1; }
+  .navbtn { width: 40px; height: 36px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-deep); color: var(--text); font-size: 16px; cursor: pointer; }
+  .row3 { display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+  .detail { border-color: var(--accent); display: flex; flex-direction: column; gap: 10px; }
+  .detail img { width: 100%; aspect-ratio: 720 / 400; object-fit: contain; background: #000; border-radius: 8px; image-rendering: pixelated; }
+  .list { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-family: var(--font-mono); line-height: 1.5; }
+  .list .s { color: var(--muted); }
+  select { height: 40px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 0 10px; font-size: 14px; max-width: 420px; }
+  @media (max-width: 1200px) { .row1, .row3 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">녹픽셀 AI 감시자</div>
+  <span style="font-size: 18px; font-weight: 700; white-space: nowrap">관찰 리포트</span>
+  <label for="run" class="hidden">실험 고르기</label>
+  <select id="run" aria-label="실험 고르기"></select>
+  <div id="chips" class="chips"></div>
+  <a class="btn" href="/observe">관찰 화면</a>
+  <a class="btn primary" href="/">새 실험</a>
+</header>
+
+<div id="no-run" class="hidden" style="padding: 48px 24px; text-align: center">
+  <p style="font-size: 18px">아직 기록된 실험이 없어요.</p>
+  <a class="btn primary" href="/">실험 설정으로 가기</a>
+</div>
+
+<main id="main" class="main">
+  <div class="row1">
+    <div class="result">
+      <span class="k">결과</span>
+      <span class="v" id="result">-</span>
+      <span class="muted" id="result-sub" style="font-size: 13px"></span>
+    </div>
+    <div class="tiles">
+      <div class="tile"><div class="panel-title">AI 판단</div><div class="v" id="t-steps">0<small>회</small></div></div>
+      <div class="tile"><div class="panel-title">토큰</div><div class="v" id="t-tokens">0</div></div>
+      <div class="tile"><div class="panel-title">비용</div><div class="v" id="t-cost" style="color: var(--accent)">$0</div></div>
+      <div class="tile"><div class="panel-title">중간 목표 변경</div><div class="v" id="t-goals">0<small>회</small></div></div>
+      <div class="tile"><div class="panel-title">개발자 개입</div><div class="v" id="t-hints">0<small>회</small></div></div>
+    </div>
+  </div>
+
+  <section class="rewind">
+    <div class="top">
+      <h2 class="section" style="font-size: 16px">되감기</h2>
+      <div class="legend">
+        <span><span style="color: #8f8676">■</span> 행동</span>
+        <span><span style="color: var(--amber)">■</span> 중간 목표 변경</span>
+        <span><span style="color: var(--teal)">■</span> 기억 메모 추가</span>
+        <span><span style="color: var(--purple)">■</span> 개발자 힌트</span>
+      </div>
+      <button id="prev" class="navbtn" type="button" aria-label="이전 판단">◀</button>
+      <span id="pos" class="mono" style="font-size: 14px; font-weight: 700">판단 0 / 0</span>
+      <button id="next" class="navbtn" type="button" aria-label="다음 판단">▶</button>
+    </div>
+    <div id="ticks" class="ticks" role="listbox" aria-label="판단 목록"></div>
+    <span class="muted" style="font-size: 12px">막대를 누르거나 ◀ ▶ (키보드 ← →)로 판단을 넘겨보세요.</span>
+  </section>
+
+  <div class="row3">
+    <section class="panel detail">
+      <div id="d-meta" class="card" style="padding: 0; border: none; background: none"></div>
+      <img id="d-shot" alt="그 판단 당시 게임 화면">
+      <div style="font-size: 14px; line-height: 1.6"><b>🧠 생각</b> — <span id="d-thought"></span></div>
+      <div style="display: flex; flex-direction: column; gap: 4px; font-size: 13px">
+        <div><b>🎮 행동</b> <span id="d-action"></span></div>
+        <div id="d-goal"></div>
+        <div id="d-extra"></div>
+      </div>
+    </section>
+
+    <section class="panel" style="display: flex; flex-direction: column; gap: 10px">
+      <h2 class="section" style="font-size: 15px">AI 분석 요약</h2>
+      <p id="summary" style="margin: 0; font-size: 14px; line-height: 1.65; color: #e2dac8"></p>
+      <button id="summarize" class="btn" type="button" style="align-self: flex-start">AI에게 요약 받기</button>
+      <h3 class="panel-title" style="margin: 8px 0 0">중간 목표가 바뀐 순서</h3>
+      <div id="goals" class="list"></div>
+    </section>
+
+    <section class="panel" style="display: flex; flex-direction: column; gap: 10px">
+      <h2 class="section" style="font-size: 15px">기억 메모가 쌓인 순서</h2>
+      <div id="memos" class="list"></div>
+      <h3 class="panel-title" style="margin: 8px 0 0">개발자 개입</h3>
+      <div id="hints" class="list"></div>
+    </section>
+  </div>
+</main>
+
+<script src="/static/common.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const COLORS = { cmd: "#8f8676", goal: "#f2c27a", memo: "#9fe0d4", hint: "#cbb8ee" };
+let run = null;
+let sel = 0;
+
+function kindOf(e) { const k = entryKinds(e); return k.includes("hint") ? "hint" : k.includes("goal") ? "goal" : k.includes("memo") ? "memo" : "cmd"; }
+
+function listOrEmpty(node, items, emptyText) {
+  node.replaceChildren(...(items.length ? items : [el("div", { class: "empty", text: emptyText })]));
+}
+
+function select(index) {
+  if (!run || !run.entries.length) return;
+  sel = Math.max(0, Math.min(run.entries.length - 1, index));
+  const e = run.entries[sel];
+  document.querySelectorAll(".tick").forEach((t, i) => { t.classList.toggle("sel", i === sel); t.setAttribute("aria-selected", i === sel); });
+  $("pos").textContent = `판단 ${e.step} / ${run.entries.length}`;
+  $("d-meta").replaceChildren(el("div", { class: "meta" },
+    el("span", { class: "tag cmd", text: `판단 ${e.step}` }),
+    entryKinds(e).map((k) => el("span", { class: "tag " + k, text: KIND_LABEL[k] })),
+    el("span", { text: e.time.replace("T", " ") })));
+  $("d-shot").src = `/shots/${encodeURIComponent(run.run_id)}/${encodeURIComponent(e.image)}`;
+  $("d-thought").textContent = e.thought || "(생각 없음)";
+  $("d-action").textContent = e.action_text + (e.speech ? `  ·  💬 "${e.speech}"` : "");
+  $("d-goal").replaceChildren(e.goal ? el("span", {}, el("b", { text: "🗺️ 중간 목표 " }), e.goal + (e.goal_changed ? " (이때 바뀜)" : "")) : "");
+  $("d-extra").replaceChildren(
+    e.memo_add ? el("div", { style: "color: var(--teal)" }, el("b", { text: "📝 메모 추가 " }), e.memo_add) : "",
+    e.hints && e.hints.length ? el("div", { style: "color: var(--purple)" }, el("b", { text: "💡 받은 힌트 " }), e.hints.join(" / ")) : "");
+}
+
+function show(data) {
+  run = data;
+  const c = data.config, es = data.entries;
+  configChips($("chips"), c);
+  const tokens = es.reduce((n, e) => n + e.input_tokens + e.output_tokens, 0);
+  const cost = es.reduce((n, e) => n + e.cost_usd, 0);
+  const goals = es.filter((e) => e.goal_changed);
+  const hinted = es.filter((e) => e.hints && e.hints.length);
+  const memos = es.filter((e) => e.memo_add);
+  const last = es[es.length - 1];
+
+  $("result").textContent = `판단 ${es.length}회 · 마지막 목표 "${(last && last.goal) || "-"}"`;
+  $("result-sub").textContent = `${(c.started_at || "").replace("T", " ")} 시작 · 보스 처치·도달 층은 게임 코드 연결 후 기록돼요`;
+  $("t-steps").replaceChildren(String(es.length), el("small", { text: "회" }));
+  $("t-tokens").textContent = number(tokens);
+  $("t-cost").textContent = money(cost);
+  $("t-goals").replaceChildren(String(goals.length), el("small", { text: "회" }));
+  $("t-hints").replaceChildren(String(hinted.length), el("small", { text: "회" }));
+
+  const heights = { cmd: 16, goal: 40, memo: 28, hint: 34 };
+  $("ticks").replaceChildren(...es.map((e, i) => {
+    const k = kindOf(e);
+    return el("button", { class: "tick", type: "button", role: "option", "aria-label": `판단 ${e.step}`,
+      style: `height: ${heights[k]}px; background: ${COLORS[k]}`, onclick: () => select(i) });
+  }));
+
+  $("summary").textContent = data.summary || "아직 요약이 없어요. 버튼을 누르면 AI가 판단 기록을 읽고 요약해요. (Haiku 기준 1센트 안팎)";
+  listOrEmpty($("goals"), goals.map((e) => el("div", {}, el("span", { class: "s", text: `판단 ${e.step}  ` }), e.goal)), "아직 없어요.");
+  listOrEmpty($("memos"), memos.map((e) => el("div", {}, el("span", { class: "s", text: `판단 ${e.step}  ` }), e.memo_add)), "AI가 적은 교훈이 없어요.");
+  listOrEmpty($("hints"), hinted.map((e) => el("div", {}, el("span", { class: "s", text: `판단 ${e.step}  ` }), e.hints.join(" / "))), "개입하지 않았어요.");
+  select(es.length - 1);
+}
+
+async function load(runId) {
+  show(await api("/api/run/" + encodeURIComponent(runId)));
+  history.replaceState(null, "", "/report?run=" + encodeURIComponent(runId));
+}
+
+async function init() {
+  const runs = await api("/api/runs");
+  if (!runs.length) { $("no-run").classList.remove("hidden"); $("main").classList.add("hidden"); return; }
+  $("run").replaceChildren(...runs.map((r) => el("option", { value: r.run_id,
+    text: `${r.run_id.slice(4, 17).replace("_", " ")} · ${r.player} · ${r.model_name} · ${r.steps}회${r.demo ? " · 데모" : ""}` })));
+  const wanted = new URLSearchParams(location.search).get("run");
+  const first = runs.some((r) => r.run_id === wanted) ? wanted : runs[0].run_id;
+  $("run").value = first;
+  await load(first);
+}
+
+$("run").addEventListener("change", () => load($("run").value));
+$("prev").addEventListener("click", () => select(sel - 1));
+$("next").addEventListener("click", () => select(sel + 1));
+document.addEventListener("keydown", (e) => {
+  if (e.target.matches("input, select, textarea")) return;
+  if (e.key === "ArrowLeft") select(sel - 1);
+  if (e.key === "ArrowRight") select(sel + 1);
+});
+$("summarize").addEventListener("click", async () => {
+  if (!run) return;
+  $("summarize").disabled = true;
+  $("summary").textContent = "AI가 기록을 읽는 중…";
+  try { $("summary").textContent = (await api(`/api/run/${encodeURIComponent(run.run_id)}/summary`, { method: "POST" })).summary; }
+  catch (e) { $("summary").textContent = e.message; }
+  $("summarize").disabled = false;
+});
+
+init().catch((e) => {
+  $("no-run").classList.remove("hidden");
+  $("main").classList.add("hidden");
+  $("no-run").querySelector("p").textContent = "리포트를 불러오지 못했어요: " + e.message;
+});
+</script>
+</body>
+</html>

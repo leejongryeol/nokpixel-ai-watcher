@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>실험 설정 · 녹픽셀 AI 감시자</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&family=Nanum+Gothic+Coding:wght@400;700&display=swap">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .layout { min-height: 100%; display: grid; grid-template-columns: minmax(0, 840fr) minmax(0, 760fr); }
+  .hero {
+    position: relative; padding: 72px 64px; display: flex; flex-direction: column; justify-content: space-between; gap: 40px;
+    background-color: #1a1813;
+    background-image:
+      linear-gradient(rgba(22,20,15,0.55), rgba(22,20,15,0.55)),
+      repeating-linear-gradient(0deg, transparent 0 31px, #262219 31px 32px),
+      repeating-linear-gradient(90deg, transparent 0 31px, #262219 31px 32px);
+  }
+  .eyebrow { font-size: 14px; letter-spacing: 3px; color: var(--accent); font-weight: 700; }
+  .hero h1 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: clamp(48px, 6vw, 76px); line-height: 1.05; color: #f5efe2; }
+  .hero p { margin: 0; max-width: 520px; font-size: 19px; line-height: 1.6; color: #e2dac8; }
+  .fixed { display: flex; flex-wrap: wrap; gap: 8px; font-size: 14px; }
+  .fixed span { padding: 7px 14px; border-radius: 999px; background: rgba(33,30,24,0.9); border: 1px solid var(--line); }
+  .formwrap { display: flex; align-items: center; justify-content: center; padding: 48px; }
+  form { width: min(560px, 100%); display: flex; flex-direction: column; gap: 22px; }
+  .two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  details summary { cursor: pointer; color: var(--text-soft); font-size: 14px; }
+  details .inner { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 12px; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+  .enter { height: 56px; font-size: 18px; border-radius: 12px; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .hero { padding: 40px 24px; } .formwrap { padding: 24px 16px; } .model-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="layout">
+  <section class="hero">
+    <div style="display: flex; flex-direction: column; gap: 16px">
+      <div class="eyebrow">SHATTERED PIXEL DUNGEON × CLAUDE</div>
+      <h1>녹픽셀<br>AI 감시자</h1>
+      <p>매 판 새로운 던전에서, 외운 공략이 아닌 스스로의 판단으로 나아가는 생성형 AI를 지켜본다.</p>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <div style="font-size: 13px; color: var(--text-soft); letter-spacing: 1px">이번 실험에서 고정되는 조건</div>
+      <div class="fixed">
+        <span>🏆 최종 목표 · 5층 보스 "구" 처치</span>
+        <span>직업 · 전사</span>
+        <span>도전 모드 · 끔</span>
+        <span>웹 검색 · 끔</span>
+        <span>AI 입력 · 게임 화면 이미지</span>
+      </div>
+      <a href="/report" style="font-size: 14px; margin-top: 8px">지난 실험 리포트 보기 →</a>
+    </div>
+  </section>
+
+  <section class="formwrap">
+    <form id="form" novalidate>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <h2 style="margin: 0; font-size: 30px">실험 설정</h2>
+        <p style="margin: 0; font-size: 15px" class="muted">게임을 먼저 켜서 던전 안까지 들어간 다음, 모두 고르고 입장하세요.</p>
+      </div>
+      <div id="demo-notice" class="notice info hidden">데모 모드예요. 게임과 API 없이 가짜 판단으로 화면만 보여줘요.</div>
+      <div id="running-notice" class="notice info hidden">진행 중인 실험이 있어요. <a href="/observe">관찰 화면으로 가기</a></div>
+
+      <div class="field">
+        <label for="player">플레이어 이름</label>
+        <input id="player" class="input" type="text" maxlength="20" autocomplete="off" required>
+        <span class="help">기록 폴더 이름에 쓰여요.</span>
+      </div>
+
+      <div class="field">
+        <span class="label" id="model-label">AI 모델</span>
+        <div id="models" class="model-grid" role="radiogroup" aria-labelledby="model-label"></div>
+      </div>
+
+      <div class="field">
+        <label for="apikey">Claude API 키</label>
+        <input id="apikey" class="input mono" type="password" autocomplete="off" placeholder="sk-ant-...">
+        <span id="key-help" class="help">이 컴퓨터의 .env에만 저장되고 GitHub에는 올라가지 않아요.</span>
+      </div>
+
+      <div class="two">
+        <div class="field">
+          <span class="label">공략 문서</span>
+          <div class="seg">
+            <label for="g-off"><input id="g-off" type="radio" name="guide" value="off" checked>없이</label>
+            <label for="g-on"><input id="g-on" type="radio" name="guide" value="on">제공</label>
+          </div>
+          <span id="guide-help" class="help">조작법은 항상 알려줘요. 공략은 guide.md 내용.</span>
+        </div>
+        <div class="field">
+          <span class="label">던전 시드</span>
+          <div class="seg">
+            <label for="s-rand"><input id="s-rand" type="radio" name="seed" value="random" checked>무작위</label>
+            <label for="s-fixed"><input id="s-fixed" type="radio" name="seed" value="fixed">직접 입력</label>
+          </div>
+          <input id="seed" class="input small mono" type="text" aria-label="시드 값" placeholder="예: 7F3-K2A-91C" disabled>
+        </div>
+      </div>
+      <span class="help" style="margin-top: -12px">시드는 기록용이에요. 게임의 새 게임 설정에도 같은 값을 넣어야 같은 던전이 나와요.</span>
+
+      <details>
+        <summary>고급 설정</summary>
+        <div class="inner">
+          <div class="field">
+            <label for="steps">최대 판단 횟수</label>
+            <input id="steps" class="input small mono" type="number" min="1" max="500" value="50">
+          </div>
+          <div class="field">
+            <span class="label">안전 장치</span>
+            <label class="check" for="dryrun"><input id="dryrun" type="checkbox"> 생각만 하고 조작 안 함</label>
+          </div>
+        </div>
+      </details>
+
+      <div id="error" class="notice error hidden" role="alert"></div>
+      <button id="enter" class="btn primary enter" type="submit">던전 입장 <span aria-hidden="true">→</span></button>
+      <span class="help" style="text-align: center">같은 시드를 쓰면 공략 유무·모델만 바꿔서 같은 던전으로 비교할 수 있어요.</span>
+    </form>
+  </section>
+</div>
+
+<script src="/static/common.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+let info = null;
+
+function saved(key, fallback) { try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; } }
+function save(key, value) { try { localStorage.setItem(key, value); } catch {} }
+
+async function init() {
+  info = await api("/api/setup-info");
+  $("player").value = saved("player", "");
+  $("models").replaceChildren(...info.models.map((m) => {
+    const perDecision = (1300 * m.price[0] + 150 * m.price[1]) / 1e6;
+    return el("label", { class: "model-card", for: "m-" + m.id },
+      el("span", { class: "name" },
+        el("input", { type: "radio", name: "model", id: "m-" + m.id, value: m.id, checked: m.id === info.default_model }),
+        m.name),
+      el("span", { class: "price", text: "판단당 약 $" + perDecision.toFixed(3) }));
+  }));
+  if (info.has_key) {
+    $("apikey").placeholder = "저장된 키 사용 중 · 바꾸려면 새로 입력";
+    $("key-help").textContent = "이미 .env에 키가 저장돼 있어요. 비워두면 저장된 키를 써요.";
+  }
+  if (!info.guide_ready) {
+    $("g-on").disabled = true;
+    $("guide-help").textContent = "guide.md가 비어 있어서 지금은 공략 없이만 할 수 있어요.";
+  }
+  $("demo-notice").classList.toggle("hidden", !info.demo);
+  $("running-notice").classList.toggle("hidden", !info.running);
+}
+
+document.querySelectorAll('input[name="seed"]').forEach((r) =>
+  r.addEventListener("change", () => { $("seed").disabled = !$("s-fixed").checked; if (!$("seed").disabled) $("seed").focus(); }));
+
+$("form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = $("error");
+  error.classList.add("hidden");
+  const player = $("player").value.trim();
+  const model = document.querySelector('input[name="model"]:checked')?.value;
+  const apiKey = $("apikey").value.trim();
+  const seedFixed = $("s-fixed").checked;
+  const problems = [];
+  if (!player) problems.push("플레이어 이름을 입력하세요.");
+  if (!info.demo && !info.has_key && !apiKey) problems.push("Claude API 키를 입력하세요.");
+  if (seedFixed && !$("seed").value.trim()) problems.push("시드 값을 입력하거나 무작위를 고르세요.");
+  if (problems.length) { error.textContent = problems.join(" "); error.classList.remove("hidden"); return; }
+
+  $("enter").disabled = true;
+  $("enter").textContent = "입장하는 중…";
+  try {
+    save("player", player);
+    await api("/api/start", { method: "POST", body: {
+      player, model, api_key: apiKey,
+      guide: $("g-on").checked,
+      seed_mode: seedFixed ? "fixed" : "random", seed: $("seed").value.trim(),
+      steps: Number($("steps").value) || 50,
+      dry_run: $("dryrun").checked,
+    }});
+    location.href = "/observe";
+  } catch (e) {
+    error.textContent = e.message;
+    error.classList.remove("hidden");
+    $("enter").disabled = false;
+    $("enter").textContent = "던전 입장 →";
+  }
+});
+
+init().catch((e) => { $("error").textContent = "서버에 연결하지 못했어요: " + e.message; $("error").classList.remove("hidden"); });
+</script>
+</body>
+</html>

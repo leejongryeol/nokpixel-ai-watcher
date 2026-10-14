@@ -62,6 +62,8 @@
       <div class="tile"><div class="panel-title">비용</div><div class="v" id="t-cost" style="color: var(--accent)">$0</div></div>
       <div class="tile"><div class="panel-title">중간 목표 변경</div><div class="v" id="t-goals">0<small>회</small></div></div>
       <div class="tile"><div class="panel-title">개발자 개입</div><div class="v" id="t-hints">0<small>회</small></div></div>
+      <div class="tile"><div class="panel-title">근거가 추측</div><div class="v" id="t-guess" style="color: var(--red)">0<small>회</small></div></div>
+      <div class="tile"><div class="panel-title">메모 스스로 지움</div><div class="v" id="t-memodel">0<small>회</small></div></div>
     </div>
   </div>
 
@@ -73,6 +75,8 @@
         <span><span style="color: var(--amber)">■</span> 중간 목표 변경</span>
         <span><span style="color: var(--teal)">■</span> 기억 메모 추가</span>
         <span><span style="color: var(--purple)">■</span> 개발자 힌트</span>
+        <span><span style="color: var(--red-strong)">■</span> 근거가 추측</span>
+        <span><span style="display: inline-block; width: 10px; border-top: 3px solid #c9c4f0; vertical-align: middle"></span> 큰 점검 (윗선)</span>
       </div>
       <button id="prev" class="navbtn" type="button" aria-label="이전 판단">◀</button>
       <span id="pos" class="mono" style="font-size: 14px; font-weight: 700">판단 0 / 0</span>
@@ -86,7 +90,9 @@
     <section class="panel detail">
       <div id="d-meta" class="card" style="padding: 0; border: none; background: none"></div>
       <img id="d-shot" alt="그 판단 당시 게임 화면">
+      <div id="d-checkpoint" style="font-size: 13px; color: #c9c4f0"></div>
       <div style="font-size: 14px; line-height: 1.6"><b>🧠 생각</b> — <span id="d-thought"></span></div>
+      <div id="d-check"></div>
       <div style="display: flex; flex-direction: column; gap: 4px; font-size: 13px">
         <div><b>🎮 행동</b> <span id="d-action"></span></div>
         <div id="d-goal"></div>
@@ -109,16 +115,31 @@
       <div id="hints" class="list"></div>
     </section>
   </div>
+
+  <div class="row1" style="grid-template-columns: repeat(2, minmax(0, 1fr))">
+    <section class="panel" style="display: flex; flex-direction: column; gap: 8px">
+      <h2 class="section" style="font-size: 15px">📜 다음 판의 나에게 · AI가 쓴 교훈</h2>
+      <pre id="lessons" class="lessons"></pre>
+    </section>
+    <section class="panel" style="display: flex; flex-direction: column; gap: 8px">
+      <h2 class="section" style="font-size: 15px">📥 이 판을 시작할 때 이어받은 교훈</h2>
+      <span id="lessons-from" class="muted mono" style="font-size: 12px"></span>
+      <pre id="inherited" class="lessons"></pre>
+    </section>
+  </div>
 </main>
 
 <script src="/static/common.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
-const COLORS = { cmd: "#8f8676", goal: "#f2c27a", memo: "#9fe0d4", hint: "#cbb8ee" };
+const COLORS = { cmd: "#8f8676", goal: "#f2c27a", memo: "#9fe0d4", memodel: "#9fe0d4", hint: "#cbb8ee", guess: "#d4604f" };
 let run = null;
 let sel = 0;
 
-function kindOf(e) { const k = entryKinds(e); return k.includes("hint") ? "hint" : k.includes("goal") ? "goal" : k.includes("memo") ? "memo" : "cmd"; }
+function kindOf(e) {
+  const k = entryKinds(e);
+  return ["hint", "goal", "memo", "memodel", "guess"].find((x) => k.includes(x)) || "cmd";
+}
 
 function listOrEmpty(node, items, emptyText) {
   node.replaceChildren(...(items.length ? items : [el("div", { class: "empty", text: emptyText })]));
@@ -136,10 +157,13 @@ function select(index) {
     el("span", { text: e.time.replace("T", " ") })));
   $("d-shot").src = `/shots/${encodeURIComponent(run.run_id)}/${encodeURIComponent(e.image)}`;
   $("d-thought").textContent = e.thought || "(생각 없음)";
+  $("d-checkpoint").textContent = e.checkpoint ? "🔍 큰 점검 · " + e.checkpoint : "";
+  $("d-check").replaceChildren(...[checkLine(e)].filter(Boolean));
   $("d-action").textContent = e.action_text + (e.speech ? `  ·  💬 "${e.speech}"` : "");
   $("d-goal").replaceChildren(e.goal ? el("span", {}, el("b", { text: "🗺️ 중간 목표 " }), e.goal + (e.goal_changed ? " (이때 바뀜)" : "")) : "");
   $("d-extra").replaceChildren(
-    e.memo_add ? el("div", { style: "color: var(--teal)" }, el("b", { text: "📝 메모 추가 " }), e.memo_add) : "",
+    e.memo_add ? el("div", { style: "color: var(--teal)" }, el("b", { text: `📝 메모 추가 ${e.memo_add_id || ""} ` }), e.memo_add) : "",
+    e.memo_removed ? el("div", { style: "color: var(--teal)" }, el("b", { text: "🗑️ 메모 지움 " }), el("s", { text: e.memo_removed })) : "",
     e.hints && e.hints.length ? el("div", { style: "color: var(--purple)" }, el("b", { text: "💡 받은 힌트 " }), e.hints.join(" / ")) : "");
 }
 
@@ -151,7 +175,7 @@ function show(data) {
   const cost = es.reduce((n, e) => n + e.cost_usd, 0);
   const goals = es.filter((e) => e.goal_changed);
   const hinted = es.filter((e) => e.hints && e.hints.length);
-  const memos = es.filter((e) => e.memo_add);
+  const memos = es.filter((e) => e.memo_add || e.memo_removed);
   const last = es[es.length - 1];
 
   $("result").textContent = `판단 ${es.length}회 · 마지막 목표 "${(last && last.goal) || "-"}"`;
@@ -161,17 +185,27 @@ function show(data) {
   $("t-cost").textContent = money(cost);
   $("t-goals").replaceChildren(String(goals.length), el("small", { text: "회" }));
   $("t-hints").replaceChildren(String(hinted.length), el("small", { text: "회" }));
+  $("t-guess").replaceChildren(String(es.filter((e) => e.basis === "추측").length), el("small", { text: "회" }));
+  $("t-memodel").replaceChildren(String(es.filter((e) => e.memo_removed).length), el("small", { text: "회" }));
 
-  const heights = { cmd: 16, goal: 40, memo: 28, hint: 34 };
+  const heights = { cmd: 16, goal: 40, memo: 28, memodel: 28, hint: 34, guess: 22 };
   $("ticks").replaceChildren(...es.map((e, i) => {
     const k = kindOf(e);
     return el("button", { class: "tick", type: "button", role: "option", "aria-label": `판단 ${e.step}`,
-      style: `height: ${heights[k]}px; background: ${COLORS[k]}`, onclick: () => select(i) });
+      title: entryKinds(e).map((x) => KIND_LABEL[x]).join(", ") || "행동",
+      style: `height: ${heights[k]}px; background: ${COLORS[k]};` + (e.checkpoint ? " border-top: 4px solid #c9c4f0;" : ""),
+      onclick: () => select(i) });
   }));
 
   $("summary").textContent = data.summary || "아직 요약이 없어요. 버튼을 누르면 AI가 판단 기록을 읽고 요약해요. (Haiku 기준 1센트 안팎)";
   listOrEmpty($("goals"), goals.map((e) => el("div", {}, el("span", { class: "s", text: `판단 ${e.step}  ` }), e.goal)), "아직 없어요.");
-  listOrEmpty($("memos"), memos.map((e) => el("div", {}, el("span", { class: "s", text: `판단 ${e.step}  ` }), e.memo_add)), "AI가 적은 교훈이 없어요.");
+  listOrEmpty($("memos"), memos.flatMap((e) => [
+    e.memo_add ? el("div", {}, el("span", { class: "s", text: `판단 ${e.step}  + ${e.memo_add_id || ""} ` }), e.memo_add) : null,
+    e.memo_removed ? el("div", { style: "color: var(--muted)" }, el("span", { class: "s", text: `판단 ${e.step}  − ` }), el("s", { text: e.memo_removed })) : null,
+  ].filter(Boolean)), "AI가 적은 교훈이 없어요.");
+  $("lessons").textContent = data.lessons || "아직 없어요. 판이 끝나면 AI가 이번 판을 돌아보고 직접 써요.";
+  $("lessons-from").textContent = c.lessons_from ? "보낸 판 · " + c.lessons_from : "";
+  $("inherited").textContent = data.inherited_lessons || "이어받지 않고 시작한 판이에요.";
   listOrEmpty($("hints"), hinted.map((e) => el("div", {}, el("span", { class: "s", text: `판단 ${e.step}  ` }), e.hints.join(" / "))), "개입하지 않았어요.");
   select(es.length - 1);
 }

@@ -16,7 +16,7 @@ from dotenv import load_dotenv, set_key
 from flask import Flask, abort, jsonify, request, send_from_directory
 
 import agent as agent_module
-from agent import MODELS, DEFAULT_MODEL, Agent, list_runs, load_run, summarize_run
+from agent import MODELS, DEFAULT_MODEL, Agent, list_runs, load_lessons, load_run, summarize_run
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(HERE, "web")
@@ -54,6 +54,18 @@ def screenshot(run_id, name):
 
 
 # ---------------- 설정 ----------------
+def lesson_sources():
+    """교훈을 남긴 지난 판 목록 (최신 순)"""
+    result = []
+    for run_id in list_runs():
+        if load_lessons(run_id):
+            run = load_run(run_id)
+            result.append({"run_id": run_id, "player": run["config"].get("player", ""),
+                           "model_name": run["config"].get("model_name", ""),
+                           "steps": len(run["entries"]), "demo": run["config"].get("demo", False)})
+    return result
+
+
 @app.get("/api/setup-info")
 def setup_info():
     a = current()
@@ -62,6 +74,7 @@ def setup_info():
         "default_model": os.getenv("MODEL", DEFAULT_MODEL),
         "has_key": bool(os.getenv("ANTHROPIC_API_KEY")),
         "guide_ready": bool(agent_module.load_guide()),
+        "lesson_sources": lesson_sources(),
         "demo": state["demo"],
         "running": bool(a and a.status == "running"),
     })
@@ -93,7 +106,8 @@ def start():
     except (TypeError, ValueError):
         steps = 50
     new = Agent(player=data.get("player", ""), model=model, guide=bool(data.get("guide")), seed=seed,
-                steps=steps, dry_run=bool(data.get("dry_run")), demo=state["demo"])
+                steps=steps, dry_run=bool(data.get("dry_run")), demo=state["demo"],
+                lessons_from=data.get("lessons_from") or "")
     state["agent"] = new
     new.start()
     return jsonify({"run_id": new.run_id})

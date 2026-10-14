@@ -26,6 +26,7 @@ def main():
     parser.add_argument("--demo", action="store_true", help="게임·API 없이 가짜 판단")
     parser.add_argument("--guide", action="store_true", help="공략 문서(guide.md) 제공")
     parser.add_argument("--player", default="cli", help="플레이어 이름 (기록 폴더 이름)")
+    parser.add_argument("--lessons-from", default="", help="이 판(logs/의 폴더 이름)에서 AI가 쓴 교훈을 이어받음")
     args = parser.parse_args()
 
     load_dotenv()
@@ -33,7 +34,9 @@ def main():
         sys.exit(".env 파일에 ANTHROPIC_API_KEY가 없어요. ai-bridge/README.md를 확인하세요.")
 
     agent = Agent(player=args.player, model=os.getenv("MODEL", DEFAULT_MODEL), guide=args.guide,
-                  steps=args.steps, dry_run=args.dry_run, demo=args.demo)
+                  steps=args.steps, dry_run=args.dry_run, demo=args.demo, lessons_from=args.lessons_from)
+    if args.lessons_from and not agent.inherited_lessons:
+        sys.exit(f"{args.lessons_from} 폴더에 교훈(lessons.md)이 없어요.")
     print(f"모델: {agent.config['model_name']} | 판단 {args.steps}번 | "
           f"{'데모' if args.demo else '생각만 (dry-run)' if args.dry_run else '실제 플레이'}")
     print(f"기록 폴더: {agent.run_dir}\n중지: Ctrl + C\n")
@@ -43,15 +46,19 @@ def main():
     try:
         while agent.status in ("ready", "running") or shown < len(agent.entries):
             for e in agent.entries[shown:]:
-                print(f"━━ {e['step']}번째 판단 ━━")
+                print(f"━━ {e['step']}번째 판단 ━━" + (f"  [큰 점검 · {e['checkpoint']}]" if e.get("checkpoint") else ""))
                 print(f"🧠 생각: {e['thought'] or '(생각 없음)'}")
                 if e["goal"]:
                     print(f"🗺️ 중간 목표: {e['goal']}{' (변경)' if e['goal_changed'] else ''}")
                 if e["speech"]:
                     print(f"💬 \"{e['speech']}\"")
                 print(f"🎮 행동: {e['action_text']}")
+                if e.get("check_goal") or e.get("basis"):
+                    print(f"🎯 되새김: {e.get('check_goal', '')}  👀 근거: {e.get('basis') or '-'}")
                 if e["memo_add"]:
-                    print(f"📝 기억 메모 추가: {e['memo_add']}")
+                    print(f"📝 기억 메모 추가 {e.get('memo_add_id', '')}: {e['memo_add']}")
+                if e.get("memo_removed"):
+                    print(f"🗑️ 기억 메모 지움: {e['memo_removed']}")
                 print(f"🪙 토큰 입력 {e['input_tokens']} / 출력 {e['output_tokens']} · 약 ${e['cost_usd']:.4f}\n")
             shown = len(agent.entries)
             time.sleep(0.3)
@@ -61,6 +68,8 @@ def main():
         while agent.status == "running":
             time.sleep(0.2)
 
+    if agent.lessons:
+        print(f"\n📜 다음 판에 남긴 교훈 (lessons.md)\n{agent.lessons}")
     if agent.status == "error":
         print(f"[오류] {agent.error}")
     print(f"끝! 총 비용 약 ${agent.total_cost:.3f} · 기록: {agent.run_dir}")

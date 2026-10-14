@@ -103,10 +103,16 @@
       <div class="panel stat"><div class="panel-title" style="margin: 0">중간 목표 변경</div><div class="v" id="goal-count">0회</div></div>
       <div class="panel stat"><div class="panel-title" style="margin: 0">체력 · 층</div><div class="muted" style="font-size: 12px; margin-top: 4px">게임 코드 연결 후 표시</div></div>
       <div class="panel stat"><div class="panel-title" style="margin: 0">개발자 개입</div><div class="v" id="hint-count">0회</div></div>
+      <div class="panel stat"><div class="panel-title" style="margin: 0">근거가 추측</div><div class="v" id="guess-count" style="color: var(--red)">0회</div></div>
+      <div class="panel stat"><div class="panel-title" style="margin: 0">큰 점검</div><div class="v" id="check-count">0회</div></div>
     </div>
     <div class="panel" style="flex: 1; display: flex; flex-direction: column; min-height: 160px">
       <div style="display: flex; justify-content: space-between; align-items: center"><p class="panel-title" style="margin: 0">기억 메모 · AI가 직접 씀</p><span id="memo-new" class="tag memo hidden">방금 추가</span></div>
       <div id="memo" class="memo" style="margin-top: 8px"><div class="empty">아직 적은 교훈이 없어요.</div></div>
+    </div>
+    <div id="lessons-panel" class="panel hidden" style="display: flex; flex-direction: column; gap: 8px">
+      <p id="lessons-title" class="panel-title" style="margin: 0">교훈</p>
+      <pre id="lessons" class="lessons"></pre>
     </div>
   </section>
 </main>
@@ -124,15 +130,33 @@ function thoughtCard(entry, isLatest, isOld) {
       el("span", { class: "tag cmd", text: `판단 ${entry.step}` }),
       kinds.map((k) => el("span", { class: "tag " + k, text: KIND_LABEL[k] })),
       entry.goal ? el("span", { text: "목표: " + entry.goal }) : null),
+    entry.checkpoint ? el("div", { class: "act", style: "color: #c9c4f0", text: "🔍 큰 점검 · " + entry.checkpoint }) : null,
     el("div", { class: "body", text: entry.thought || "(생각 없음)" }),
+    checkLine(entry),
     el("div", { class: "act" }, "→ ", el("b", { text: entry.action_text })),
-    entry.memo_add ? el("div", { class: "act", style: "color: var(--teal)", text: "📝 " + entry.memo_add }) : null);
+    entry.memo_add ? el("div", { class: "act", style: "color: var(--teal)", text: `📝 ${entry.memo_add_id || ""} ${entry.memo_add}` }) : null,
+    entry.memo_removed ? el("div", { class: "act", style: "color: var(--teal); text-decoration: line-through", text: "🗑️ " + entry.memo_removed }) : null);
 }
 
 function hintCard(entry) {
   return el("div", { class: "card hint" },
     el("div", { class: "meta" }, el("span", { class: "tag hint", text: "개발자 개입" }), `판단 ${entry.step}에 전달`),
     entry.hints.map((h) => el("div", { class: "body", text: `"${h}"` })));
+}
+
+function renderLessons(s) {
+  const panel = $("lessons-panel");
+  if (s.lessons_state === "writing") {
+    $("lessons-title").textContent = "다음 판의 나에게 · 교훈 쓰는 중…";
+    $("lessons").textContent = "판이 끝났어요. AI가 이번 판을 돌아보며 교훈을 쓰고 있어요.";
+  } else if (s.lessons) {
+    $("lessons-title").textContent = "다음 판의 나에게 · AI가 쓴 교훈";
+    $("lessons").textContent = s.lessons;
+  } else if (s.inherited_lessons) {
+    $("lessons-title").textContent = "지난 판에서 이어받은 교훈";
+    $("lessons").textContent = s.inherited_lessons;
+  } else { panel.classList.add("hidden"); return; }
+  panel.classList.remove("hidden");
 }
 
 function render(s) {
@@ -154,6 +178,7 @@ function render(s) {
   $("error").classList.toggle("hidden", s.status !== "error");
   $("error").textContent = s.status === "error" ? "오류로 멈췄어요: " + s.error : "";
   $("hint-pending").textContent = s.pending_hints.length ? `전달 대기: ${s.pending_hints.join(" / ")}` : "";
+  renderLessons(s);
 
   // 새 판단만 반영
   const newest = s.entries[s.entries.length - 1];
@@ -182,11 +207,14 @@ function render(s) {
   const lastChange = changes[changes.length - 1];
   $("goal-change").textContent = lastChange ? `마지막 변경 · 판단 ${lastChange.step}` : "";
   $("hint-count").textContent = allEntries.filter((e) => e.hints && e.hints.length).length + "회";
+  $("guess-count").textContent = allEntries.filter((e) => e.basis === "추측").length + "회";
+  $("check-count").textContent = allEntries.filter((e) => e.checkpoint).length + "회";
 
   const sent = [
     "[최근 기록] 최근 판단 " + Math.min(5, allEntries.length - 1) + "개",
     "[현재 중간 목표] " + (s.goal || "(아직 없음)"),
-    s.memo.length ? "[기억 메모]\n" + s.memo.map((m) => "- " + m).join("\n") : "[기억 메모] (없음)",
+    s.memo.length ? "[기억 메모]\n" + s.memo.map((m) => `- ${m.id} (판단 ${m.step}에 적음): ${m.text}`).join("\n") : "[기억 메모] (없음)",
+    newest.checkpoint ? "[큰 점검 · " + newest.checkpoint + "]" : null,
     newest.hints && newest.hints.length ? "[개발자 힌트]\n" + newest.hints.map((h) => "- " + h).join("\n") : null,
     "[현재 게임 화면] (이미지)",
     "",
@@ -195,7 +223,8 @@ function render(s) {
   $("sent").textContent = sent;
 
   $("memo").replaceChildren(...(s.memo.length
-    ? s.memo.map((m, i) => el("div", { class: i === s.memo.length - 1 && newest.memo_add ? "new" : "", text: (i === s.memo.length - 1 && newest.memo_add ? "+ " : "- ") + m }))
+    ? s.memo.map((m) => { const isNew = m.id === newest.memo_add_id;
+        return el("div", { class: isNew ? "new" : "", text: `${isNew ? "+" : "-"} ${m.id} · ${m.text}  (판단 ${m.step})` }); })
     : [el("div", { class: "empty", text: "아직 적은 교훈이 없어요." })]));
   $("memo-new").classList.toggle("hidden", !newest.memo_add);
 }

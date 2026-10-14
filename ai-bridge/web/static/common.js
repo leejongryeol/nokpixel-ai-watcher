@@ -44,15 +44,29 @@ function entryKinds(entry) {
   if (entry.hints && entry.hints.length) kinds.push("hint");
   if (entry.goal_changed) kinds.push("goal");
   if (entry.memo_add) kinds.push("memo");
+  if (entry.memo_removed) kinds.push("memodel");
+  if (entry.checkpoint) kinds.push("check");
+  if (entry.basis === "추측") kinds.push("guess");
   return kinds;
 }
-const KIND_LABEL = { hint: "개발자 힌트", goal: "중간 목표 변경", memo: "기억 메모 추가", cmd: "행동" };
+const KIND_LABEL = { hint: "개발자 힌트", goal: "중간 목표 변경", memo: "기억 메모 추가", memodel: "🗑️ 기억 메모 지움",
+  check: "큰 점검", guess: "근거: 추측", cmd: "행동" };
+const BASIS_ICON = { "화면": "👀 화면에서 봄", "기록": "📒 기록·메모", "추측": "❓ 추측" };
+
+// 생각 카드·리포트에 쓰는 되새김 한 줄
+function checkLine(entry) {
+  if (!entry.check_goal && !entry.basis) return null;
+  return el("div", { class: "check" + (entry.basis === "추측" ? " guess" : "") },
+    entry.check_goal ? el("span", {}, "🎯 ", entry.check_goal) : null,
+    entry.basis ? el("span", { class: "basis", text: BASIS_ICON[entry.basis] || entry.basis }) : null);
+}
 
 function configChips(container, config) {
   container.replaceChildren(...[
     el("span", { class: "chip" }, "플레이어 · ", el("b", { text: config.player || "-" })),
     el("span", { class: "chip" }, "모델 · ", el("b", { text: config.model_name || "-" })),
     el("span", { class: "chip" }, "공략 · ", el("b", { text: config.guide ? "제공" : "없이" })),
+    config.lessons_from ? el("span", { class: "chip" }, "교훈 · ", el("b", { text: "이어받음" })) : null,
     el("span", { class: "chip mono" }, "시드 · " + (config.seed || "무작위")),
     config.dry_run ? el("span", { class: "chip" }, el("b", { text: "생각만 (조작 안 함)" })) : null,
     config.demo ? el("span", { class: "chip" }, el("b", { text: "데모" })) : null,

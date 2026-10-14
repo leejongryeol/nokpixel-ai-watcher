@@ -98,6 +98,12 @@
       </div>
       <span class="help" style="margin-top: -12px">시드는 기록용이에요. 게임의 새 게임 설정에도 같은 값을 넣어야 같은 던전이 나와요.</span>
 
+      <div class="field">
+        <label for="lessons-from">지난 판의 교훈</label>
+        <select id="lessons-from" class="input"><option value="">이어받지 않음</option></select>
+        <span id="lessons-help" class="help">판이 끝나면 AI가 다음 판의 자신에게 교훈을 직접 써요. 그 교훈을 들고 시작할 수 있어요.</span>
+      </div>
+
       <details>
         <summary>고급 설정</summary>
         <div class="inner">
@@ -146,6 +152,12 @@ async function init() {
     $("g-on").disabled = true;
     $("guide-help").textContent = "guide.md가 비어 있어서 지금은 공략 없이만 할 수 있어요.";
   }
+  $("lessons-from").append(...info.lesson_sources.map((r) => el("option", { value: r.run_id,
+    text: `${r.run_id.slice(4, 17).replace("_", " ")} · ${r.player} · ${r.model_name} · ${r.steps}회${r.demo ? " · 데모" : ""}` })));
+  if (!info.lesson_sources.length) {
+    $("lessons-from").disabled = true;
+    $("lessons-help").textContent = "아직 교훈을 남긴 판이 없어요. 한 판을 끝내면 고를 수 있어요.";
+  }
   $("demo-notice").classList.toggle("hidden", !info.demo);
   $("running-notice").classList.toggle("hidden", !info.running);
 }
@@ -174,6 +186,7 @@ $("form").addEventListener("submit", async (event) => {
     await api("/api/start", { method: "POST", body: {
       player, model, api_key: apiKey,
       guide: $("g-on").checked,
+      lessons_from: $("lessons-from").value,
       seed_mode: seedFixed ? "fixed" : "random", seed: $("seed").value.trim(),
       steps: Number($("steps").value) || 50,
       dry_run: $("dryrun").checked,

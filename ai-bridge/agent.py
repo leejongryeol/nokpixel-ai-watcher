@@ -43,6 +43,7 @@ LESSONS_FILE = "lessons.md"  # 판이 끝나고 AI가 쓴 교훈
 INHERITED_FILE = "inherited_lessons.md"  # 판을 시작할 때 이어받은 교훈 (기록용 사본)
 BASIS_VALUES = ["화면", "기록", "추측"]
 WAIT_AFTER_ACTION = 0.6  # 행동 후 화면이 바뀔 때까지 기다리는 시간(초)
+FOCUS_RETRIES = 3  # 게임 창을 맨 앞으로 가져오기 시도 횟수 (입력 전 확인)
 
 MODELS = {  # price: 100만 토큰당 (입력, 출력) 달러
     "claude-haiku-4-5-20251001": {"name": "Haiku 4.5", "provider": "anthropic", "price": (1.0, 5.0)},
@@ -277,10 +278,10 @@ class WindowsGame:
         import ctypes
         from ctypes import wintypes
         import pyautogui
-        from PIL import ImageGrab
+        from PIL import Image, ImageGrab
 
         self.ctypes, self.wintypes = ctypes, wintypes
-        self.pyautogui, self.ImageGrab = pyautogui, ImageGrab
+        self.pyautogui, self.Image, self.ImageGrab = pyautogui, Image, ImageGrab
         self.user32 = ctypes.windll.user32
         try:  # 화면 배율(125%, 150% 등)이 있어도 실제 픽셀 좌표를 쓰도록 설정
             ctypes.windll.shcore.SetProcessDpiAwareness(2)
@@ -299,15 +300,70 @@ class WindowsGame:
         return origin.x, origin.y, origin.x + rect.right, origin.y + rect.bottom
 
     def focus(self):
-        self.user32.ShowWindow(self.hwnd, 9)  # 최소화돼 있으면 복원
-        self.user32.SetForegroundWindow(self.hwnd)
-        time.sleep(0.15)
+        """게임 창을 맨 앞으로 가져온다. 정말 맨 앞에 왔으면 True.
+        Windows는 뒤에 있는 프로그램이 창을 앞으로 가져오는 것을 자주 막아서, 막히면 방법을 바꿔 다시 시도한다."""
+        u = self.user32
+        if u.IsIconic(self.hwnd):
+            u.ShowWindow(self.hwnd, 9)  # 최소화돼 있으면 복원
+        for attempt in range(FOCUS_RETRIES):
+            if u.GetForegroundWindow() == self.hwnd:
+                return True
+            if attempt > 0:  # Alt 키를 한 번 눌렀다 떼면 창 전환이 허용된다
+                u.keybd_event(0x12, 0, 0, 0)
+                u.keybd_event(0x12, 0, 2, 0)
+            # 지금 맨 앞 창의 입력 흐름에 잠깐 붙어서 전환 허락을 얻는다
+            fg_thread = u.GetWindowThreadProcessId(u.GetForegroundWindow(), None)
+            my_thread = self.ctypes.windll.kernel32.GetCurrentThreadId()
+            u.AttachThreadInput(my_thread, fg_thread, True)
+            u.BringWindowToTop(self.hwnd)
+            u.SetForegroundWindow(self.hwnd)
+            u.AttachThreadInput(my_thread, fg_thread, False)
+            time.sleep(0.15)
+        return u.GetForegroundWindow() == self.hwnd
+
+    def _require_focus(self):
+        """입력 직전 확인: 게임 창이 맨 앞이 아니면 아무것도 누르지 않고 멈춘다 (다른 창에 키가 들어가는 것을 막음)."""
+        if not self.focus():
+            raise RuntimeError("게임 창을 맨 앞으로 가져오지 못해서 입력을 멈췄어요. 다른 창에 키가 들어가는 것을 막기 위해서예요.")
+
+    def _print_window(self, width, height):
+        """가려져 있어도 게임 창 내용을 직접 받아온다. 실패하거나 완전히 검은 화면이면 None."""
+        ctypes, wintypes, u = self.ctypes, self.wintypes, self.user32
+        gdi = ctypes.windll.gdi32
+
+        class BITMAPINFOHEADER(ctypes.Structure):
+            _fields_ = [("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG), ("biHeight", wintypes.LONG),
+                        ("biPlanes", wintypes.WORD), ("biBitCount", wintypes.WORD), ("biCompression", wintypes.DWORD),
+                        ("biSizeImage", wintypes.DWORD), ("biXPelsPerMeter", wintypes.LONG),
+                        ("biYPelsPerMeter", wintypes.LONG), ("biClrUsed", wintypes.DWORD),
+                        ("biClrImportant", wintypes.DWORD)]
+
+        hdc = u.GetDC(self.hwnd)
+        mem = gdi.CreateCompatibleDC(hdc)
+        bitmap = gdi.CreateCompatibleBitmap(hdc, width, height)
+        gdi.SelectObject(mem, bitmap)
+        try:
+            if not u.PrintWindow(self.hwnd, mem, 1 | 2):  # 창 안쪽만 | 그래픽 가속 화면까지
+                return None
+            header = BITMAPINFOHEADER(ctypes.sizeof(BITMAPINFOHEADER), width, -height, 1, 32, 0, 0, 0, 0, 0, 0)
+            buffer = ctypes.create_string_buffer(width * height * 4)
+            gdi.GetDIBits(mem, bitmap, 0, height, buffer, ctypes.byref(header), 0)
+            image = self.Image.frombuffer("RGB", (width, height), buffer, "raw", "BGRX", 0, 1)
+            return image if image.convert("L").getextrema()[1] > 0 else None
+        finally:
+            gdi.DeleteObject(bitmap)
+            gdi.DeleteDC(mem)
+            u.ReleaseDC(self.hwnd, hdc)
 
     def capture(self):
         """게임 화면을 찍어 AI용 크기로 맞춘다."""
-        self.focus()  # 다른 창(관찰 화면 등)에 가려지지 않게 앞으로 가져온다
+        focused = self.focus()  # 실패해도 괜찮다. PrintWindow는 가려진 창도 찍는다
         box = self._client_box()
-        image = self.ImageGrab.grab(bbox=box, all_screens=True).convert("RGB")
+        image = self._print_window(box[2] - box[0], box[3] - box[1])
+        if image is None:  # 안 되면 화면에서 그대로 찍는다. 게임이 맨 앞이 아니면 다른 창이 찍히므로 멈춘다
+            if not focused:
+                raise RuntimeError("게임 창을 찍지 못했어요. 게임 창이 최소화돼 있거나 다른 창에 가려져 있어요.")
+            image = self.ImageGrab.grab(bbox=box, all_screens=True).convert("RGB")
         self.geometry = (box[0], box[1], image.width / AI_IMAGE_SIZE[0], image.height / AI_IMAGE_SIZE[1])
         if image.size != AI_IMAGE_SIZE:
             image = image.resize(AI_IMAGE_SIZE)
@@ -316,13 +372,14 @@ class WindowsGame:
     def execute(self, action):
         if not action:
             return
-        self.focus()
         if action["tool"] == "press_keys":
             for key in action["input"].get("keys", [])[:3]:
                 if key in ALLOWED_KEYS:
+                    self._require_focus()
                     self.pyautogui.press(key)
                     time.sleep(0.15)
         elif action["tool"] == "click":
+            self._require_focus()
             left, top, scale_x, scale_y = self.geometry
             x = int(left + action["input"]["x"] * scale_x)
             y = int(top + action["input"]["y"] * scale_y)

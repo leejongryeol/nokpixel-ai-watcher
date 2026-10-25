@@ -203,7 +203,9 @@ function show(data) {
     e.memo_add ? el("div", {}, el("span", { class: "s", text: `판단 ${e.step}  + ${e.memo_add_id || ""} ` }), e.memo_add) : null,
     e.memo_removed ? el("div", { style: "color: var(--muted)" }, el("span", { class: "s", text: `판단 ${e.step}  − ` }), el("s", { text: e.memo_removed })) : null,
   ].filter(Boolean)), "AI가 적은 교훈이 없어요.");
-  $("lessons").textContent = data.lessons || "아직 없어요. 판이 끝나면 AI가 이번 판을 돌아보고 직접 써요.";
+  $("lessons").textContent = data.lessons || (c.dry_run
+    ? "생각만 하기 판이라 교훈을 쓰지 않았어요. (조작하지 않은 판에서 나온 교훈은 틀리기 쉬워요)"
+    : "아직 없어요. 판이 끝나면 AI가 이번 판을 돌아보고 직접 써요.");
   $("lessons-from").textContent = c.lessons_from ? "보낸 판 · " + c.lessons_from : "";
   $("inherited").textContent = data.inherited_lessons || "이어받지 않고 시작한 판이에요.";
   listOrEmpty($("hints"), hinted.map((e) => el("div", {}, el("span", { class: "s", text: `판단 ${e.step}  ` }), e.hints.join(" / "))), "개입하지 않았어요.");

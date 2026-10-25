@@ -41,6 +41,7 @@ CHECKPOINT_EVERY = 10  # 이 횟수마다 큰 점검
 CHECKPOINT_LOG_SIZE = 10  # 큰 점검 때 보여줄 최근 판단 개수
 LESSONS_FILE = "lessons.md"  # 판이 끝나고 AI가 쓴 교훈
 INHERITED_FILE = "inherited_lessons.md"  # 판을 시작할 때 이어받은 교훈 (기록용 사본)
+FINAL_IMAGE = "final.png"  # 판이 끝난 뒤 화면 (마지막 행동의 결과, 교훈 쓰기에 사용)
 BASIS_VALUES = ["화면", "기록", "추측"]
 WAIT_AFTER_ACTION = 0.6  # 행동 후 화면이 바뀔 때까지 기다리는 시간(초)
 FOCUS_RETRIES = 3  # 게임 창을 맨 앞으로 가져오기 시도 횟수 (입력 전 확인)
@@ -533,7 +534,7 @@ class Agent:
             with open(os.path.join(self.run_dir, INHERITED_FILE), "w", encoding="utf-8") as f:
                 f.write(self.inherited_lessons + "\n")
         self.status = "running"
-        final_status, client, image = "finished", None, None
+        final_status, client, image, game = "finished", None, None, None
         try:
             game = DemoGame() if self.config["demo"] else WindowsGame()
             if not self.config["demo"]:
@@ -574,9 +575,22 @@ class Agent:
             final_status = "error"
             self.error = str(error)
 
-        if self.entries:  # 한 번이라도 판단했으면 다음 판을 위한 교훈을 쓴다
+        # 한 번이라도 판단했으면 다음 판을 위한 교훈을 쓴다.
+        # 생각만 하기(dry-run)는 조작을 안 했는데 AI가 "눌렀더니 ~됐다"는 틀린 교훈을 써서 건너뛴다.
+        if self.entries and not self.config["dry_run"]:
+            if game is not None and not self.config["demo"]:
+                image = self._capture_final(game) or image
             self._finish_with_lessons(client, final_status, image)
         self.status = final_status
+
+    def _capture_final(self, game):
+        """마지막 행동의 결과가 보이도록, 판이 끝난 뒤 화면을 한 번 더 찍는다. 실패하면 None."""
+        try:
+            image = game.capture()
+            image.save(os.path.join(self.run_dir, FINAL_IMAGE))
+            return image
+        except Exception:
+            return None
 
     def _record(self, step, image_name, thought, action, usage, hints, checkpoint):
         price_in, price_out = MODELS[self.config["model"]]["price"]
@@ -683,7 +697,7 @@ class Agent:
             for e in self.entries[-150:])
         memo = "\n".join(f"- {m['id']}: {m['text']}" for m in self.memo) or "(없음)"
         prompt = f"""방금 던전 게임 한 판이 끝났다. 끝난 이유: {ending}
-최종 목표는 지하 5층의 보스 처치였다. 마지막 화면을 보면 캐릭터가 살아 있는지, 몇 층인지 알 수 있다.
+최종 목표는 지하 5층의 보스 처치였다. 마지막 화면(마지막 행동까지 끝난 뒤의 화면)을 보면 캐릭터가 살아 있는지, 몇 층인지 알 수 있다.
 
 [이번 판의 판단 기록]
 {log}

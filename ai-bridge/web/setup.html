@@ -35,7 +35,7 @@
 <div class="layout">
   <section class="hero">
     <div style="display: flex; flex-direction: column; gap: 16px">
-      <div class="eyebrow">SHATTERED PIXEL DUNGEON × CLAUDE</div>
+      <div class="eyebrow">SHATTERED PIXEL DUNGEON × CLAUDE · OPENAI</div>
       <h1>녹픽셀<br>AI 감시자</h1>
       <p>매 판 새로운 던전에서, 외운 공략이 아닌 스스로의 판단으로 나아가는 생성형 AI를 지켜본다.</p>
     </div>
@@ -73,7 +73,7 @@
       </div>
 
       <div class="field">
-        <label for="apikey">Claude API 키</label>
+        <label for="apikey" id="key-label">Claude API 키</label>
         <input id="apikey" class="input mono" type="password" autocomplete="off" placeholder="sk-ant-...">
         <span id="key-help" class="help">이 컴퓨터의 .env에만 저장되고 GitHub에는 올라가지 않아요.</span>
       </div>
@@ -142,12 +142,10 @@ async function init() {
       el("span", { class: "name" },
         el("input", { type: "radio", name: "model", id: "m-" + m.id, value: m.id, checked: m.id === info.default_model }),
         m.name),
-      el("span", { class: "price", text: "판단당 약 $" + perDecision.toFixed(3) }));
+      el("span", { class: "price", text: "판단당 약 $" + perDecision.toFixed(perDecision < 0.001 ? 4 : 3) }));
   }));
-  if (info.has_key) {
-    $("apikey").placeholder = "저장된 키 사용 중 · 바꾸려면 새로 입력";
-    $("key-help").textContent = "이미 .env에 키가 저장돼 있어요. 비워두면 저장된 키를 써요.";
-  }
+  document.querySelectorAll('input[name="model"]').forEach((r) => r.addEventListener("change", updateKeyField));
+  updateKeyField();
   if (!info.guide_ready) {
     $("g-on").disabled = true;
     $("guide-help").textContent = "guide.md가 비어 있어서 지금은 공략 없이만 할 수 있어요.";
@@ -160,6 +158,25 @@ async function init() {
   }
   $("demo-notice").classList.toggle("hidden", !info.demo);
   $("running-notice").classList.toggle("hidden", !info.running);
+}
+
+// 고른 모델의 회사(Claude / OpenAI)에 맞춰 API 키 칸을 바꾼다
+function selectedProvider() {
+  const id = document.querySelector('input[name="model"]:checked')?.value;
+  const provider = info.models.find((m) => m.id === id)?.provider || "anthropic";
+  return { id: provider, ...info.providers[provider] };
+}
+
+function updateKeyField() {
+  const p = selectedProvider();
+  $("key-label").textContent = p.name + " API 키";
+  if (p.has_key) {
+    $("apikey").placeholder = "저장된 키 사용 중 · 바꾸려면 새로 입력";
+    $("key-help").textContent = `이미 .env에 ${p.name} 키가 저장돼 있어요. 비워두면 저장된 키를 써요.`;
+  } else {
+    $("apikey").placeholder = p.id === "openai" ? "sk-..." : "sk-ant-...";
+    $("key-help").textContent = "이 컴퓨터의 .env에만 저장되고 GitHub에는 올라가지 않아요.";
+  }
 }
 
 document.querySelectorAll('input[name="seed"]').forEach((r) =>
@@ -175,7 +192,7 @@ $("form").addEventListener("submit", async (event) => {
   const seedFixed = $("s-fixed").checked;
   const problems = [];
   if (!player) problems.push("플레이어 이름을 입력하세요.");
-  if (!info.demo && !info.has_key && !apiKey) problems.push("Claude API 키를 입력하세요.");
+  if (!info.demo && !selectedProvider().has_key && !apiKey) problems.push(selectedProvider().name + " API 키를 입력하세요.");
   if (seedFixed && !$("seed").value.trim()) problems.push("시드 값을 입력하거나 무작위를 고르세요.");
   if (problems.length) { error.textContent = problems.join(" "); error.classList.remove("hidden"); return; }
 

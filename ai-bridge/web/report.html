@@ -197,7 +197,7 @@ function show(data) {
       onclick: () => select(i) });
   }));
 
-  $("summary").textContent = data.summary || "아직 요약이 없어요. 버튼을 누르면 AI가 판단 기록을 읽고 요약해요. (Haiku 기준 1센트 안팎)";
+  $("summary").textContent = data.summary || "아직 요약이 없어요. 버튼을 누르면 AI가 판단 기록을 읽고 요약해요. (그 판과 같은 회사의 가장 저렴한 모델로, 1센트 안팎)";
   listOrEmpty($("goals"), goals.map((e) => el("div", {}, el("span", { class: "s", text: `판단 ${e.step}  ` }), e.goal)), "아직 없어요.");
   listOrEmpty($("memos"), memos.flatMap((e) => [
     e.memo_add ? el("div", {}, el("span", { class: "s", text: `판단 ${e.step}  + ${e.memo_add_id || ""} ` }), e.memo_add) : null,

@@ -16,7 +16,7 @@ from dotenv import load_dotenv, set_key
 from flask import Flask, abort, jsonify, request, send_from_directory
 
 import agent as agent_module
-from agent import MODELS, DEFAULT_MODEL, Agent, list_runs, load_lessons, load_run, summarize_run
+from agent import MODELS, PROVIDERS, DEFAULT_MODEL, Agent, key_env, list_runs, load_lessons, load_run, summarize_run
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(HERE, "web")
@@ -70,9 +70,9 @@ def lesson_sources():
 def setup_info():
     a = current()
     return jsonify({
-        "models": [{"id": k, "name": v["name"], "price": v["price"]} for k, v in MODELS.items()],
+        "models": [{"id": k, "name": v["name"], "provider": v["provider"], "price": v["price"]} for k, v in MODELS.items()],
         "default_model": os.getenv("MODEL", DEFAULT_MODEL),
-        "has_key": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "providers": {k: {"name": v["name"], "has_key": bool(os.getenv(v["key_env"]))} for k, v in PROVIDERS.items()},
         "guide_ready": bool(agent_module.load_guide()),
         "lesson_sources": lesson_sources(),
         "demo": state["demo"],
@@ -87,18 +87,19 @@ def start():
         return jsonify({"error": "이미 실험이 진행 중이에요. 관찰 화면에서 먼저 중지하세요."}), 409
     data = request.get_json(force=True)
     model = data.get("model") if data.get("model") in MODELS else DEFAULT_MODEL
+    env_name = key_env(model)
 
     api_key = (data.get("api_key") or "").strip()
-    if api_key:  # 새로 입력한 키는 이 컴퓨터의 .env에만 저장
+    if api_key:  # 새로 입력한 키는 이 컴퓨터의 .env에만, 고른 모델의 회사 이름으로 저장
         if not os.path.exists(ENV_PATH):
             open(ENV_PATH, "a", encoding="utf-8").close()
-        set_key(ENV_PATH, "ANTHROPIC_API_KEY", api_key, quote_mode="never")
-        os.environ["ANTHROPIC_API_KEY"] = api_key
+        set_key(ENV_PATH, env_name, api_key, quote_mode="never")
+        os.environ[env_name] = api_key
     if os.path.exists(ENV_PATH):  # 마지막에 고른 모델을 기억
         set_key(ENV_PATH, "MODEL", model, quote_mode="never")
 
-    if not state["demo"] and not os.getenv("ANTHROPIC_API_KEY"):
-        return jsonify({"error": "Claude API 키를 입력하세요."}), 400
+    if not state["demo"] and not os.getenv(env_name):
+        return jsonify({"error": f"{PROVIDERS[MODELS[model]['provider']]['name']} API 키를 입력하세요."}), 400
 
     seed = data.get("seed", "") if data.get("seed_mode") == "fixed" else ""
     try:

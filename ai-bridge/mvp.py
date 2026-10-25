@@ -6,6 +6,7 @@
   python mvp.py --dry-run        # AI가 보고 생각만 함 (조작 안 함). 처음엔 이걸로!
   python mvp.py --steps 20       # AI가 20번 판단하며 실제로 플레이
   python mvp.py --demo           # 게임·API 없이 가짜 판단으로 흐름만 확인
+  python mvp.py --model gpt-6-luna --dry-run   # 모델 고르기 (기본: .env의 MODEL, 없으면 Haiku 4.5)
   중지: Ctrl + C (또는 마우스를 화면 왼쪽 위 구석으로 이동)
 """
 
@@ -16,7 +17,7 @@ import time
 
 from dotenv import load_dotenv
 
-from agent import Agent, DEFAULT_MODEL
+from agent import Agent, DEFAULT_MODEL, MODELS, key_env
 
 
 def main():
@@ -27,13 +28,15 @@ def main():
     parser.add_argument("--guide", action="store_true", help="공략 문서(guide.md) 제공")
     parser.add_argument("--player", default="cli", help="플레이어 이름 (기록 폴더 이름)")
     parser.add_argument("--lessons-from", default="", help="이 판(logs/의 폴더 이름)에서 AI가 쓴 교훈을 이어받음")
+    parser.add_argument("--model", choices=list(MODELS), help="AI 모델 (기본: .env의 MODEL, 없으면 Haiku 4.5)")
     args = parser.parse_args()
 
     load_dotenv()
-    if not args.demo and not os.getenv("ANTHROPIC_API_KEY"):
-        sys.exit(".env 파일에 ANTHROPIC_API_KEY가 없어요. ai-bridge/README.md를 확인하세요.")
+    model = args.model or os.getenv("MODEL", DEFAULT_MODEL)
+    if not args.demo and not os.getenv(key_env(model)):
+        sys.exit(f".env 파일에 {key_env(model)}가 없어요. ai-bridge/README.md를 확인하세요.")
 
-    agent = Agent(player=args.player, model=os.getenv("MODEL", DEFAULT_MODEL), guide=args.guide,
+    agent = Agent(player=args.player, model=model, guide=args.guide,
                   steps=args.steps, dry_run=args.dry_run, demo=args.demo, lessons_from=args.lessons_from)
     if args.lessons_from and not agent.inherited_lessons:
         sys.exit(f"{args.lessons_from} 폴더에 교훈(lessons.md)이 없어요.")

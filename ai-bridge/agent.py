@@ -5,8 +5,8 @@ mvp.py(명령줄)와 web.py(관찰 웹 화면)가 함께 쓰는 핵심 로직이
 
 한 번의 판단
   1. 게임 창 스크린샷을 찍는다 (Windows)
-  2. 스크린샷 + 최근 기록 + (있으면) 개발자 힌트를 Claude에게 보낸다
-  3. Claude가 생각을 글로 쓰고, 도구(press_keys / click)로 행동을 고른다
+  2. 스크린샷 + 최근 기록 + (있으면) 개발자 힌트를 AI 모델(Claude 또는 OpenAI)에게 보낸다
+  3. AI가 생각을 글로 쓰고, 도구(press_keys / click)로 행동을 고른다
      도구에는 말풍선(speech), 중간 목표(goal), 되새김(check_goal, basis),
      기억 메모 추가·지우기(memo_add, memo_remove)도 함께 담긴다
   4. 행동을 실제 키 입력·클릭으로 실행하고, logs/ 폴더에 기록한다
@@ -44,12 +44,25 @@ INHERITED_FILE = "inherited_lessons.md"  # 판을 시작할 때 이어받은 교
 BASIS_VALUES = ["화면", "기록", "추측"]
 WAIT_AFTER_ACTION = 0.6  # 행동 후 화면이 바뀔 때까지 기다리는 시간(초)
 
-MODELS = {
-    "claude-haiku-4-5-20251001": {"name": "Haiku 4.5", "price": (1.0, 5.0)},
-    "claude-sonnet-5-5": {"name": "Sonnet 5.5", "price": (2.0, 10.0)},
-    "claude-opus-5-5": {"name": "Opus 5.5", "price": (4.0, 20.0)},
+MODELS = {  # price: 100만 토큰당 (입력, 출력) 달러
+    "claude-haiku-4-5-20251001": {"name": "Haiku 4.5", "provider": "anthropic", "price": (1.0, 5.0)},
+    "claude-sonnet-5-5": {"name": "Sonnet 5.5", "provider": "anthropic", "price": (2.0, 10.0)},
+    "claude-opus-5-5": {"name": "Opus 5.5", "provider": "anthropic", "price": (4.0, 20.0)},
+    "gpt-6-luna": {"name": "GPT-6 Luna", "provider": "openai", "price": (0.10, 0.50)},
+    "gpt-6.1-sol": {"name": "GPT-6.1 Sol", "provider": "openai", "price": (2.0, 10.0)},
+    "gpt-6-astra": {"name": "GPT-6 Astra", "provider": "openai", "price": (10.0, 50.0)},
 }
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+PROVIDERS = {  # cheap_model: 연결 테스트·리포트 요약에 쓰는 가장 저렴한 모델
+    "anthropic": {"name": "Claude", "key_env": "ANTHROPIC_API_KEY", "cheap_model": "claude-haiku-4-5-20251001"},
+    "openai": {"name": "OpenAI", "key_env": "OPENAI_API_KEY", "cheap_model": "gpt-6-luna"},
+}
+OPENAI_REASONING_EFFORT = "low"  # OpenAI 모델이 답하기 전에 속으로 생각하는 양 (출력 토큰으로 계산됨)
+
+
+def key_env(model):
+    """그 모델을 쓰려면 필요한 API 키 이름 (예: OPENAI_API_KEY)"""
+    return PROVIDERS[MODELS.get(model, MODELS[DEFAULT_MODEL])["provider"]]["key_env"]
 
 # ---------------------------------------------------------------------------
 # AI에게 주는 규칙과 도구 (Claude Plays Pokémon 방식: 짧은 규칙 + 생각은 글로 + 행동은 도구로)
@@ -179,6 +192,79 @@ def to_base64_png(image):
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return base64.standard_b64encode(buffer.getvalue()).decode()
+
+
+# ---------------------------------------------------------------------------
+# AI 모델 호출 (Claude / OpenAI의 API 형식 차이를 여기서만 다룬다)
+# ---------------------------------------------------------------------------
+def _openai_tool(tool):
+    """Claude 형식 도구 → OpenAI 형식 도구.
+    OpenAI 추론 모델은 도구를 꼭 쓰게 하면 글 답변 없이 도구만 부르는 일이 많아서, 생각을 도구 안 thought 칸으로 받는다."""
+    schema = json.loads(json.dumps(tool["input_schema"]))
+    schema["properties"] = {"thought": {"type": "string", "description": "화면에서 무엇을 봤고 왜 이렇게 할지 한국어 2~3문장"},
+                            **schema["properties"]}
+    schema["required"] = ["thought", *schema["required"]]
+    return {"type": "function", "name": tool["name"], "description": tool["description"], "parameters": schema,
+            "strict": False}
+
+
+class LLM:
+    """모델 하나를 부르는 창구. content는 ("text", 글) / ("image", PIL 이미지) 목록."""
+
+    def __init__(self, model):
+        self.model = model if model in MODELS else DEFAULT_MODEL
+        self.provider = MODELS[self.model]["provider"]
+        if self.provider == "openai":
+            import openai
+            self.client = openai.OpenAI()
+        else:
+            import anthropic
+            self.client = anthropic.Anthropic()
+
+    def ask(self, content, max_tokens, system=None, tools=None):
+        """(글, 도구 호출 {"tool", "input"} 또는 None, 토큰 사용량)을 돌려준다."""
+        if self.provider == "openai":
+            return self._ask_openai(content, max_tokens, system, tools)
+        return self._ask_anthropic(content, max_tokens, system, tools)
+
+    def _ask_anthropic(self, content, max_tokens, system, tools):
+        parts = [{"type": "text", "text": value} if kind == "text" else
+                 {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": to_base64_png(value)}}
+                 for kind, value in content]
+        kwargs = {"model": self.model, "max_tokens": max_tokens, "messages": [{"role": "user", "content": parts}]}
+        if system:
+            kwargs["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+        if tools:
+            kwargs["tools"] = tools
+        response = self.client.messages.create(**kwargs)
+        text = " ".join(b.text.strip() for b in response.content if b.type == "text").strip()
+        tool = next((b for b in response.content if b.type == "tool_use"), None)
+        action = {"tool": tool.name, "input": dict(tool.input)} if tool else None
+        usage = {"input_tokens": response.usage.input_tokens, "output_tokens": response.usage.output_tokens}
+        return text, action, usage
+
+    def _ask_openai(self, content, max_tokens, system, tools):
+        parts = [{"type": "input_text", "text": value} if kind == "text" else
+                 {"type": "input_image", "image_url": "data:image/png;base64," + to_base64_png(value), "detail": "high"}
+                 for kind, value in content]
+        kwargs = {"model": self.model, "input": [{"role": "user", "content": parts}],
+                  "max_output_tokens": max_tokens + 2048,  # 속으로 생각하는 추론 토큰도 여기에 포함된다
+                  "reasoning": {"effort": OPENAI_REASONING_EFFORT}}
+        if system:
+            kwargs["instructions"] = system
+        if tools:
+            kwargs.update(tools=[_openai_tool(t) for t in tools], tool_choice="required", parallel_tool_calls=False)
+        response = self.client.responses.create(**kwargs)
+        text = (response.output_text or "").strip()
+        call = next((o for o in response.output if o.type == "function_call"), None)
+        action = None
+        if call:
+            inp = json.loads(call.arguments or "{}")
+            thought = str(inp.pop("thought", "") or "").strip()
+            text = text or thought
+            action = {"tool": call.name, "input": inp}
+        usage = {"input_tokens": response.usage.input_tokens, "output_tokens": response.usage.output_tokens}
+        return text, action, usage
 
 
 # ---------------------------------------------------------------------------
@@ -394,8 +480,7 @@ class Agent:
         try:
             game = DemoGame() if self.config["demo"] else WindowsGame()
             if not self.config["demo"]:
-                import anthropic
-                client = anthropic.Anthropic()
+                client = LLM(self.config["model"])
             system = SYSTEM_PROMPT
             if self.config["guide"]:
                 guide = load_guide()
@@ -505,22 +590,11 @@ class Agent:
                      "② 지금 중간 목표가 여전히 맞는가 "
                      "③ 기억 메모 중 근거가 약하거나 틀린 것은 없는가 (있으면 memo_remove)")
         content = [
-            {"type": "text", "text": text + "\n\n[현재 게임 화면]"},
-            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": to_base64_png(image)}},
-            {"type": "text", "text": "생각을 쓰고 도구로 행동해라."},
+            ("text", text + "\n\n[현재 게임 화면]"),
+            ("image", image),
+            ("text", "생각을 쓰고 도구로 행동해라."),
         ]
-        response = client.messages.create(
-            model=self.config["model"],
-            max_tokens=2048,
-            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-            tools=TOOLS,
-            messages=[{"role": "user", "content": content}],
-        )
-        thought = " ".join(b.text.strip() for b in response.content if b.type == "text").strip()
-        tool = next((b for b in response.content if b.type == "tool_use"), None)
-        action = {"tool": tool.name, "input": dict(tool.input)} if tool else None
-        usage = {"input_tokens": response.usage.input_tokens, "output_tokens": response.usage.output_tokens}
-        return thought, action, usage
+        return client.ask(content, 2048, system=system, tools=TOOLS)
 
     # ----- 판이 끝난 뒤: 다음 판의 나에게 남기는 교훈 -----
     def _finish_with_lessons(self, client, final_status, image):
@@ -533,8 +607,7 @@ class Agent:
                 lessons = DEMO_LESSONS
             else:
                 if client is None:
-                    import anthropic
-                    client = anthropic.Anthropic()
+                    client = LLM(self.config["model"])
                 lessons, usage = self._ask_lessons(client, ending, image)
                 price_in, price_out = MODELS[self.config["model"]]["price"]
                 with self._lock:
@@ -569,14 +642,11 @@ class Agent:
 - 한 줄에 하나, 최대 7줄. 각 줄 끝에 근거가 된 판단 번호를 적는다. 예: "- 막다른 길에서는 e e로 탐색하면 길이 나온다 (근거: 판단 14)"
 - 지난 교훈 중 이번 판에서도 맞았던 것은 남기고 끝에 (이어받음)을 붙인다. 틀린 것으로 드러난 것은 고치거나 뺀다.
 - 교훈 목록만 출력해라."""
-        content = [{"type": "text", "text": prompt}]
+        content = [("text", prompt)]
         if image is not None:
-            content += [{"type": "text", "text": "[마지막 게임 화면]"},
-                        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": to_base64_png(image)}}]
-        response = client.messages.create(model=self.config["model"], max_tokens=1024,
-                                          messages=[{"role": "user", "content": content}])
-        lessons = "".join(b.text for b in response.content if b.type == "text").strip()
-        return lessons, {"input_tokens": response.usage.input_tokens, "output_tokens": response.usage.output_tokens}
+            content += [("text", "[마지막 게임 화면]"), ("image", image)]
+        lessons, _, usage = client.ask(content, 1024)
+        return lessons, usage
 
 
 # ---------------------------------------------------------------------------
@@ -617,7 +687,7 @@ def load_run(run_id):
 
 
 def summarize_run(run_id, demo=False):
-    """판단 기록을 AI에게 넘겨 관찰 리포트 요약을 받는다. (가장 저렴한 모델 사용)"""
+    """판단 기록을 AI에게 넘겨 관찰 리포트 요약을 받는다. (그 판과 같은 회사의 가장 저렴한 모델 사용)"""
     run = load_run(run_id)
     if not run:
         raise FileNotFoundError(run_id)
@@ -625,16 +695,14 @@ def summarize_run(run_id, demo=False):
         summary = ("데모 기록이라 실제 분석은 하지 않았어요. 실제 판에서는 이 칸에 AI가 판단 기록을 읽고 "
                    "중간 목표의 변화, 위험한 선택, 기억 메모가 행동을 바꾼 순간을 요약해 줘요.")
     else:
-        import anthropic
         lines = [f"{e['step']}. [목표: {e.get('goal', '')}] [근거: {e.get('basis') or '-'}] {e['thought']} → {e['action_text']}"
                  + (f" (힌트: {'; '.join(e['hints'])})" if e.get("hints") else "")
                  for e in run["entries"]]
         prompt = ("다음은 AI가 던전 게임을 플레이하며 남긴 판단 기록이다. 관찰자를 위해 한국어로 5문장 이내로 요약해라. "
                   "어떤 중간 목표를 세우고 바꿨는지, 위험하거나 인상적인 판단, 추측에 기대 판단한 순간, 실패에서 배운 것을 중심으로.\n\n"
                   + "\n".join(lines[-300:]))
-        response = anthropic.Anthropic().messages.create(
-            model=DEFAULT_MODEL, max_tokens=800, messages=[{"role": "user", "content": prompt}])
-        summary = "".join(b.text for b in response.content if b.type == "text").strip()
+        provider = MODELS.get(run["config"].get("model"), MODELS[DEFAULT_MODEL])["provider"]
+        summary, _, _ = LLM(PROVIDERS[provider]["cheap_model"]).ask([("text", prompt)], 800)
     with open(os.path.join(LOGS_DIR, run["run_id"], "summary.txt"), "w", encoding="utf-8") as f:
         f.write(summary)
     return summary

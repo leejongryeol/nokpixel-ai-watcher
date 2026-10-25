@@ -48,7 +48,7 @@ python mvp.py --dry-run --steps 10
 
 ## 3. 보안 (예외 없음)
 - API 키는 `ai-bridge/.env`에만 둔다. **`.env`를 읽거나, 출력하거나, 커밋하지 않는다.** 실험 기록 `ai-bridge/logs/`도 커밋하지 않는다.
-- `ANTHROPIC_API_KEY`를 시스템 환경 변수로 설정하라고 안내하지 않는다. 개발 비용이 API 크레딧으로 빠질 수 있다.
+- `ANTHROPIC_API_KEY`·`OPENAI_API_KEY`를 시스템 환경 변수로 설정하라고 안내하지 않는다. 개발 비용이 API 크레딧으로 빠질 수 있다.
 - 커밋 전에 `git status`와 diff를 확인해서 비밀 정보나 의도하지 않은 파일이 섞이지 않았는지 본다.
 
 ## 4. GitHub

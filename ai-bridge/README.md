@@ -5,10 +5,10 @@
 | 파일 | 역할 |
 |---|---|
 | `web.py` | **관찰 웹 화면** (설정 → 관찰 → 리포트) |
-| `agent.py` | AI 플레이어 핵심 로직 (화면 캡처, Claude 호출, 입력, 기록) |
+| `agent.py` | AI 플레이어 핵심 로직 (화면 캡처, AI 호출(Claude / OpenAI), 입력, 기록) |
 | `mvp.py` | 웹 화면 없이 콘솔에서 바로 실행 |
 | `guide.md` | 공략 문서 (설정에서 "공략 제공"을 고르면 AI에게 전달) |
-| `test_connection.py` | Claude API 연결 확인 |
+| `test_connection.py` | API 연결 확인 (`.env`에 키가 있는 회사마다, 또는 `python test_connection.py gpt-6-luna`처럼 모델 하나) |
 | `web/` | 웹 화면 파일 (HTML, CSS, JS) |
 
 > 실제 플레이는 **Windows 전용**이에요. 데모 모드는 어디서나 돼요.
@@ -20,9 +20,22 @@
    ```bash
    pip install -r requirements.txt
    ```
-3. [Claude Console](https://console.anthropic.com/)에서 API 키 발급 (크레딧 충전 필요)
-   - 키는 웹 화면의 실험 설정에서 입력해도 되고, `.env.example`을 `.env`로 복사해 직접 적어도 돼요
+3. 쓰려는 모델 회사의 API 키 발급 (크레딧 충전 필요). 둘 중 하나만 있어도 돼요
+   - Claude 모델: [Claude Console](https://console.anthropic.com/) → `.env`의 `ANTHROPIC_API_KEY`
+   - GPT 모델: [OpenAI Platform](https://platform.openai.com/api-keys) → `.env`의 `OPENAI_API_KEY`
+   - 키는 웹 화면의 실험 설정에서 입력해도 되고(고른 모델에 맞는 이름으로 저장돼요), `.env.example`을 `.env`로 복사해 직접 적어도 돼요
    > ⚠️ `.env`는 `.gitignore`에 들어 있어서 GitHub에 올라가지 않아요.
+
+## 모델
+
+| 회사 | 모델 | 입력 / 출력 ($/100만 토큰) |
+|---|---|---|
+| Claude | Haiku 4.5 (기본값) / Sonnet 5.5 / Opus 5.5 | 1 / 5 · 2 / 10 · 4 / 20 |
+| OpenAI | GPT-6 Luna / GPT-6.1 Sol / GPT-6 Astra | 0.1 / 0.5 · 2 / 10 · 10 / 50 |
+
+- 명령줄에서는 `--model gpt-6-luna`처럼 고르고, 안 고르면 `.env`의 `MODEL`(웹 화면에서 마지막에 고른 모델), 그것도 없으면 Haiku 4.5를 써요.
+- OpenAI 모델은 답하기 전에 속으로 생각하는 추론 단계가 있어서 강도를 `low`로 두었어요. 추론 토큰도 출력 요금으로 계산돼요.
+- 두 회사의 차이: OpenAI 모델은 생각을 도구 안의 `thought` 칸에 쓰고, 도구를 반드시 하나 쓰게 했어요(Claude는 생각을 글로 쓰고 도구를 고름). 규칙(시스템 프롬프트)과 도구의 나머지 칸은 같아요.
 
 ## 실행
 

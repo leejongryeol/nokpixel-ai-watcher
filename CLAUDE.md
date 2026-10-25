@@ -23,6 +23,7 @@ Claude Code가 이 저장소에서 일할 때 따르는 규칙이다. claude.ai 
 | `docs/project/architecture.md` | 현재 구조와 예정 구조, 사용할 게임 코드 지점 |
 | `docs/project/decision-points.md` | `Hero.ready()` 기준 판단 요청 목록 |
 | `docs/project/progress-milestones.md` | 진행도 이정표 (평가용) |
+| `docs/test-results/` | 날짜별 테스트 결과 기록 (`test-results-YYYY-MM-DD.txt`). 실제로 돌린 결과만 쓴다 |
 
 ## 2. 실행 명령 (Windows)
 

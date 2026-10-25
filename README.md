@@ -212,6 +212,7 @@ python web.py            # 실제 실행 (Windows, Claude API 키 필요)
 | `docs/project/` | **추가**: 시스템 구조, 판단 요청과 숨길 정보, 진행도 이정표 |
 | `CLAUDE.md`, `.claude/settings.json` | **추가**: Claude Code(IntelliJ·VS Code)가 이 저장소에서 따르는 규칙, `.env` 읽기 금지 설정 |
 | `docs/images/` | **추가**: UI 화면 캡처 |
+| `docs/test-results/` | **추가**: 날짜별 테스트 결과 기록 (`test-results-YYYY-MM-DD.txt`) |
 | `docs/getting-started-*.md` | 원본 게임 빌드 안내 (원작자 작성) |
 
 ## 참고 사례

@@ -179,7 +179,8 @@ public class DesktopLauncher {
 		// [nokpixel-ai-watcher] AI 관찰용: 창 크기를 720x400으로 고정한다.
 		// AI에게 보내는 스크린샷 크기(=토큰 비용)를 일정하게 유지하기 위함.
 		// 720x400은 게임이 허용하는 최소 크기이며, 이때 화면은 2배 확대로 그려진다.
-		SPDSettings.fullscreen( false );
+		// SPDSettings.fullscreen()은 화면 갱신(platform, Gdx.app)까지 부르는데 둘 다 아직 없으므로 값만 저장한다.
+		SPDSettings.put( SPDSettings.KEY_FULLSCREEN, false );
 		SPDSettings.windowMaximized( false );
 		SPDSettings.windowResolution( new Point( AI_WINDOW_WIDTH, AI_WINDOW_HEIGHT ) );
 		config.setWindowSizeLimits( AI_WINDOW_WIDTH, AI_WINDOW_HEIGHT, AI_WINDOW_WIDTH, AI_WINDOW_HEIGHT );

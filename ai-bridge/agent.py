@@ -46,6 +46,9 @@ FINAL_IMAGE = "final.png"  # 판이 끝난 뒤 화면 (마지막 행동의 결�
 BASIS_VALUES = ["화면", "기록", "추측"]
 WAIT_AFTER_ACTION = 0.6  # 행동 후 화면이 바뀔 때까지 기다리는 시간(초)
 FOCUS_RETRIES = 3  # 게임 창을 맨 앞으로 가져오기 시도 횟수 (입력 전 확인)
+FOCUS_WAIT_SECONDS = 30  # 그래도 못 가져오면 다시 시도하며 기다리는 최대 시간(초). 넘으면 판을 멈춘다
+FOCUS_WAIT_INTERVAL = 2  # 기다리는 동안 다시 시도하는 간격(초)
+TYPING_WAIT_SECONDS = 60  # 관찰자가 힌트를 입력하는 동안 다음 판단을 미루는 최대 시간(초)
 
 MODELS = {  # price: 100만 토큰당 (입력, 출력) 달러
     "claude-haiku-4-5-20251001": {"name": "Haiku 4.5", "provider": "anthropic", "price": (1.0, 5.0)},
@@ -273,6 +276,10 @@ class LLM:
 # ---------------------------------------------------------------------------
 # 게임 창 찾기, 화면 찍기, 입력 (Windows 전용, 실제 플레이할 때만 불러옴)
 # ---------------------------------------------------------------------------
+class StopRequested(Exception):
+    """게임 창을 기다리는 중에 관찰자가 중지를 누름."""
+
+
 class WindowsGame:
     def __init__(self):
         if sys.platform != "win32":
@@ -293,6 +300,11 @@ class WindowsGame:
         if not self.hwnd:
             raise RuntimeError(f'"{GAME_WINDOW_TITLE}" 창을 찾지 못했어요. 게임을 먼저 실행하세요.')
         self.geometry = (0, 0, 1.0, 1.0)
+        self.stop_event = None  # 에이전트의 중지 신호 (게임 창을 기다리는 중에도 중지할 수 있게)
+        self.waiting_focus = False  # 게임 창을 맨 앞으로 가져오지 못해 기다리는 중
+
+    def is_front(self):
+        return self.user32.GetForegroundWindow() == self.hwnd
 
     def _client_box(self):
         rect = self.wintypes.RECT()
@@ -324,9 +336,24 @@ class WindowsGame:
         return u.GetForegroundWindow() == self.hwnd
 
     def _require_focus(self):
-        """입력 직전 확인: 게임 창이 맨 앞이 아니면 아무것도 누르지 않고 멈춘다 (다른 창에 키가 들어가는 것을 막음)."""
-        if not self.focus():
-            raise RuntimeError("게임 창을 맨 앞으로 가져오지 못해서 입력을 멈췄어요. 다른 창에 키가 들어가는 것을 막기 위해서예요.")
+        """입력 직전 확인: 게임 창이 맨 앞이 아니면 아무것도 누르지 않는다 (다른 창에 키가 들어가는 것을 막음).
+        못 가져오면 다시 시도하며 최대 FOCUS_WAIT_SECONDS 기다리고, 그래도 안 되면 멈춘다."""
+        if self.focus():
+            return
+        self.waiting_focus = True
+        try:
+            deadline = time.time() + FOCUS_WAIT_SECONDS
+            while time.time() < deadline:
+                if self.stop_event is not None and self.stop_event.wait(FOCUS_WAIT_INTERVAL):
+                    raise StopRequested()
+                if self.stop_event is None:
+                    time.sleep(FOCUS_WAIT_INTERVAL)
+                if self.focus():
+                    return
+        finally:
+            self.waiting_focus = False
+        raise RuntimeError(f"게임 창을 {FOCUS_WAIT_SECONDS}초 동안 맨 앞으로 가져오지 못해서 입력을 멈췄어요. "
+                           "다른 창에 키가 들어가는 것을 막기 위해서예요.")
 
     def _print_window(self, width, height):
         """가려져 있어도 게임 창 내용을 직접 받아온다. 실패하거나 완전히 검은 화면이면 None."""
@@ -459,7 +486,7 @@ class Agent:
     """한 판의 실험을 실행한다. start()로 백그라운드 실행, stop()으로 중지."""
 
     def __init__(self, player="player", model=DEFAULT_MODEL, guide=False, seed="", steps=50,
-                 dry_run=False, demo=False, lessons_from=""):
+                 dry_run=False, demo=False, lessons_from="", lock_input=False):
         lessons_from = os.path.basename(lessons_from or "")
         self.inherited_lessons = load_lessons(lessons_from)
         self.config = {
@@ -492,6 +519,14 @@ class Agent:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._thread = None
+        # 세 창 관찰 화면용 (기록·AI 입력에는 들어가지 않는다)
+        self.phase = "ready"  # ready → capture → thinking → acting → (typing) … → done
+        self.game = None
+        self._typing_until = 0.0
+        self.input_lock = None
+        if lock_input and not demo:
+            from input_lock import InputLock
+            self.input_lock = InputLock()
 
     # ----- 외부에서 쓰는 함수 -----
     def start(self):
@@ -499,6 +534,7 @@ class Agent:
         self._thread.start()
 
     def stop(self):
+        self._typing_until = 0.0
         self._stop.set()
 
     def add_hint(self, text):
@@ -507,9 +543,36 @@ class Agent:
             with self._lock:
                 self._hints.append(text)
 
-    def snapshot(self, last=12):
+    def set_typing(self, on):
+        """관찰자가 힌트를 입력하는 동안 다음 판단을 미룬다 (게임 창이 입력 중에 앞으로 튀어나오지 않게)."""
+        self._typing_until = time.time() + TYPING_WAIT_SECONDS if on else 0.0
+
+    def focus_game(self):
+        """게임 창을 맨 앞으로 가져온다. 데모는 게임 창이 없으므로 True."""
+        if self.game is None or not hasattr(self.game, "focus"):
+            return self.config["demo"]
+        return self.game.focus()
+
+    def live_state(self):
+        """관찰 화면 신호등용: 게임 창이 맨 앞인지, 게임 창을 기다리는 중인지, 잠금 상태."""
+        game = self.game
+        return {
+            "phase": self.phase,
+            "typing": time.time() < self._typing_until,
+            "game_front": game.is_front() if hasattr(game, "is_front") else None,
+            "focus_waiting": bool(getattr(game, "waiting_focus", False)),
+            "lock_used": self.input_lock is not None,
+            "locked": bool(self.input_lock and self.input_lock.active),
+            "lock_note": self.input_lock.note if self.input_lock else "",
+        }
+
+    def snapshot(self, last=12, since=None):
+        live = self.live_state()
         with self._lock:
+            entries = [e for e in self.entries if e["step"] > since] if since is not None else self.entries[-last:]
             return {
+                **live,
+                "entry_count": len(self.entries),
                 "run_id": self.run_id,
                 "config": self.config,
                 "status": self.status,
@@ -523,7 +586,7 @@ class Agent:
                 "total_cost": round(self.total_cost, 4),
                 "total_tokens": self.total_tokens,
                 "pending_hints": list(self._hints),
-                "entries": self.entries[-last:],
+                "entries": entries,
             }
 
     # ----- 실행 -----
@@ -538,6 +601,10 @@ class Agent:
         final_status, client, image, game = "finished", None, None, None
         try:
             game = DemoGame() if self.config["demo"] else WindowsGame()
+            game.stop_event = self._stop
+            self.game = game
+            if self.input_lock is not None:  # 실패해도 판은 진행한다 (관찰 화면에 🔓와 이유가 보임)
+                self.input_lock.start(game.hwnd)
             if not self.config["demo"]:
                 client = LLM(self.config["model"])
             system = SYSTEM_PROMPT
@@ -551,10 +618,12 @@ class Agent:
                            + self.inherited_lessons)
 
             for step in range(1, self.config["steps"] + 1):
+                self._wait_while_typing()
                 if self._stop.is_set():
                     final_status = "stopped"
                     break
                 self.step = step
+                self.phase = "capture"
                 image = game.capture()
                 image_name = f"step_{step:03d}.png"
                 image.save(os.path.join(self.run_dir, image_name))
@@ -563,18 +632,26 @@ class Agent:
                     hints, self._hints = self._hints, []
                 checkpoint = checkpoint_reason(step, self.entries)
 
+                self.phase = "thinking"
                 if self.config["demo"]:
                     thought, action, usage = demo_decision(step)
                 else:
                     thought, action, usage = self._ask(client, system, image, hints, checkpoint)
 
                 self._record(step, image_name, thought, action, usage, hints, checkpoint)
+                self.phase = "acting"
                 if not self.config["dry_run"]:
                     game.execute(action)
                 time.sleep(WAIT_AFTER_ACTION)
+        except StopRequested:
+            final_status = "stopped"
         except Exception as error:  # 관찰 화면에 오류를 보여주기 위해 모두 잡는다
             final_status = "error"
             self.error = str(error)
+        finally:  # 판이 어떻게 끝나든 입력 잠금을 푼다
+            if self.input_lock is not None:
+                self.input_lock.stop()
+        self.phase = "done"
 
         # 한 번이라도 판단했으면 다음 판을 위한 교훈을 쓴다.
         # 생각만 하기(dry-run)는 조작을 안 했는데 AI가 "눌렀더니 ~됐다"는 틀린 교훈을 써서 건너뛴다.
@@ -583,6 +660,11 @@ class Agent:
                 image = self._capture_final(game) or image
             self._finish_with_lessons(client, final_status, image)
         self.status = final_status
+
+    def _wait_while_typing(self):
+        while time.time() < self._typing_until and not self._stop.is_set():
+            self.phase = "typing"
+            time.sleep(0.2)
 
     def _capture_final(self, game):
         """마지막 행동의 결과가 보이도록, 판이 끝난 뒤 화면을 한 번 더 찍는다. 실패하면 None."""

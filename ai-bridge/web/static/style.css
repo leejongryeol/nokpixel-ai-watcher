@@ -99,3 +99,7 @@ h2.section { margin: 0; font-size: 18px; font-weight: 700; }
 .notice.info { background: var(--purple-bg); color: var(--purple); }
 
 .empty { color: var(--muted); font-size: 13px; line-height: 1.5; padding: 8px 0; }
+
+/* 세 창 화면: 아직 작동하지 않는 자리 (회색, 눌리지 않음) */
+.soon { opacity: 0.45; filter: grayscale(1); pointer-events: none; user-select: none; }
+.soon-tag { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #2e2a22; color: var(--muted); font-size: 11px; font-weight: 700; white-space: nowrap; }

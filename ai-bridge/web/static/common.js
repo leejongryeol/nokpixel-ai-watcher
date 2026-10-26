@@ -67,6 +67,25 @@ function checkLine(entry) {
     entry.basis ? el("span", { class: "basis", text: BASIS_ICON[entry.basis] || entry.basis }) : null);
 }
 
+// 판단 하나의 상세 (리포트 되감기, 세 창 판단 기록에서 함께 쓴다). 페이지에 d-meta … d-extra 요소가 있어야 한다.
+function fillEntryDetail(e, config, runId) {
+  const $d = (id) => document.getElementById(id);
+  $d("d-meta").replaceChildren(el("div", { class: "meta" },
+    el("span", { class: "tag cmd", text: `판단 ${e.step}` }),
+    entryKinds(e).map((k) => el("span", { class: "tag " + k, text: KIND_LABEL[k] })),
+    el("span", { text: e.time.replace("T", " ") })));
+  $d("d-shot").src = `/shots/${encodeURIComponent(runId)}/${encodeURIComponent(e.image)}`;
+  $d("d-thought").textContent = e.thought || "(생각 없음)";
+  $d("d-checkpoint").textContent = e.checkpoint ? "🔍 큰 점검 · " + e.checkpoint : "";
+  $d("d-check").replaceChildren(...[checkLine(e)].filter(Boolean));
+  $d("d-action").textContent = actionLabel(e, config) + (e.speech ? `  ·  💬 "${e.speech}"` : "");
+  $d("d-goal").replaceChildren(e.goal ? el("span", {}, el("b", { text: "🗺️ 중간 목표 " }), e.goal + (e.goal_changed ? " (이때 바뀜)" : "")) : "");
+  $d("d-extra").replaceChildren(
+    e.memo_add ? el("div", { style: "color: var(--teal)" }, el("b", { text: `📝 메모 추가 ${e.memo_add_id || ""} ` }), e.memo_add) : "",
+    e.memo_removed ? el("div", { style: "color: var(--teal)" }, el("b", { text: "🗑️ 메모 지움 " }), el("s", { text: e.memo_removed })) : "",
+    e.hints && e.hints.length ? el("div", { style: "color: var(--purple)" }, el("b", { text: "💡 받은 힌트 " }), e.hints.join(" / ")) : "");
+}
+
 function configChips(container, config) {
   container.replaceChildren(...[
     el("span", { class: "chip" }, "플레이어 · ", el("b", { text: config.player || "-" })),

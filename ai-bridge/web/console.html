@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>판단 기록 · 녹픽셀</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&family=Nanum+Gothic+Coding:wght@400;700&display=swap">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  body { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; height: 100%; overflow: hidden; }
+  .settings { display: flex; flex-direction: column; gap: 8px; }
+  .settings fieldset { border: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: 13px; }
+  .settings label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .settings select, .settings input[type=text], .settings input[type=number] { height: 32px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-deep); color: var(--text); font-size: 13px; }
+  .settings input[type=number] { width: 70px; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .buttons .btn { height: 34px; padding: 0 12px; font-size: 13px; }
+  .body { flex: 1; min-height: 0; display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 10px; }
+  .list { overflow: auto; display: flex; flex-direction: column; gap: 4px; padding: 6px; }
+  .item { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 6px 8px; border-radius: 6px; border: 1px solid transparent; background: none; color: var(--text); font-size: 13px; text-align: left; cursor: pointer; }
+  .item:hover { border-color: var(--line); }
+  .item.sel { border-color: var(--accent); background: var(--accent-soft); }
+  .item .tag { font-size: 11px; padding: 1px 5px; }
+  .star { padding: 5px 8px; border-radius: 6px; background: var(--purple-bg); border: 1px dashed #8d77b8; color: var(--purple); font-size: 12.5px; line-height: 1.4; }
+  .star.pending { opacity: 0.75; }
+  .detail { overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+  .detail img { flex: 1 1 0; min-height: 160px; width: 100%; object-fit: contain; object-position: left top; border-radius: 8px; image-rendering: pixelated; }
+  .nav { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+  .nav .btn { height: 30px; padding: 0 10px; font-size: 13px; }
+  .hintform { display: flex; flex-direction: column; gap: 6px; }
+  .hintform .row { display: flex; gap: 8px; }
+  .hintform input { flex: 1; height: 40px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-deep); color: var(--text); font-size: 14px; }
+  .hintform button { height: 40px; padding: 0 16px; border-radius: 8px; border: none; background: var(--purple-btn); color: #fff; font-weight: 700; font-size: 14px; cursor: pointer; }
+  .hintform button:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
+</head>
+<body>
+  <form id="settings" class="settings panel">
+    <fieldset id="fields">
+      <label>플레이어 <input id="player" type="text" size="8" autocomplete="off"></label>
+      <label>모델 <select id="model"></select></label>
+      <span role="radiogroup" aria-label="방식" style="display: inline-flex; gap: 10px">
+        <label><input type="radio" name="mode" value="dry" checked> 생각만</label>
+        <label><input type="radio" name="mode" value="live"> 실제 조작</label>
+      </span>
+      <label>최대 판단 <input id="steps" type="number" min="1" max="500" value="50"></label>
+      <label><input id="guide" type="checkbox"> 공략 제공</label>
+      <label>교훈 이어받기 <select id="lessons-from"><option value="">없음</option></select></label>
+      <label>시드 <input id="seed" type="text" size="10" placeholder="무작위" autocomplete="off"></label>
+    </fieldset>
+    <div class="buttons">
+      <button id="start" class="btn primary" type="submit">▶ 시작</button>
+      <button id="stop" class="btn danger" type="button" disabled>■ 중지</button>
+      <button id="layout" class="btn" type="button">⊞ 창 배치</button>
+      <button id="focus" class="btn" type="button" disabled>게임 창 앞으로</button>
+      <span class="soon" style="display: inline-flex; gap: 8px; align-items: center; font-size: 13px">
+        <label><input type="checkbox" disabled> 한 번만 실행</label>
+        <label>판단 간격 <input type="number" disabled style="width: 50px"> 초</label>
+        <label>비용 상한 $<input type="number" disabled style="width: 60px"></label>
+        <span class="soon-tag">준비 중</span>
+      </span>
+      <span id="msg" class="help"></span>
+    </div>
+    <p id="error" class="notice error hidden" style="margin: 0; padding: 6px 10px; font-size: 13px"></p>
+  </form>
+
+  <div class="body">
+    <section class="panel" style="display: flex; flex-direction: column; min-height: 0; padding: 8px">
+      <div class="panel-title" style="margin: 0 0 4px 4px">판단 기록 (최신이 위)</div>
+      <div id="list" class="list" role="listbox" aria-label="판단 목록"><div class="empty">시작하면 판단이 여기에 쌓여요.</div></div>
+    </section>
+    <section class="panel detail">
+      <div class="nav">
+        <button id="prev" class="btn" type="button" aria-label="이전 판단">◀ 이전</button>
+        <button id="next" class="btn" type="button" aria-label="다음 판단">다음 ▶</button>
+        <label><input id="follow" type="checkbox" checked> 최신 따라가기</label>
+        <span class="grow" style="flex: 1"></span>
+        <a id="report" class="help" href="/report" target="_blank" rel="noopener">리포트 열기</a>
+      </div>
+      <div id="d-meta"></div>
+      <div id="d-goal" style="font-size: 14px"></div>
+      <div style="font-size: 15px; line-height: 1.6"><b>🧠 생각</b> — <span id="d-thought"></span></div>
+      <div id="d-checkpoint" style="font-size: 13px; color: #c9c4f0"></div>
+      <div style="font-size: 14px"><b>🎮 행동</b> <span id="d-action"></span></div>
+      <div id="d-check"></div>
+      <div id="d-extra" style="font-size: 13px; display: flex; flex-direction: column; gap: 4px"></div>
+      <img id="d-shot" alt="그 판단 때 AI가 본 게임 화면">
+    </section>
+  </div>
+
+  <form id="hintform" class="hintform panel">
+    <label for="hint" class="panel-title" style="margin: 0; color: var(--purple); font-weight: 700">개발자 개입 · 다음 판단 때 AI에게 전달 (힌트만, 조종 불가)</label>
+    <div class="row">
+      <input id="hint" type="text" placeholder="힌트를 입력하세요" autocomplete="off" disabled>
+      <button id="send" type="submit" disabled>보내기</button>
+    </div>
+    <span class="help" style="font-size: 12px">이번 판 개입 <b id="hint-count">0</b>회 · 입력하는 동안 AI는 다음 판단을 기다려요 (최대 60초)
+      <span class="soon" style="margin-left: 8px">개입 뒤 AI 반응 강조 <span class="soon-tag">준비 중</span></span></span>
+  </form>
+
+<script src="/static/common.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+let info = null, runId = null, config = null, entries = [], pending = [], sel = -1, running = false;
+
+function save(key, value) { try { localStorage.setItem("console." + key, value); } catch (e) {} }
+function load(key) { try { return localStorage.getItem("console." + key) || ""; } catch (e) { return ""; } }
+function showError(text) { $("error").textContent = text; $("error").classList.toggle("hidden", !text); }
+
+async function init() {
+  info = await api("/api/setup-info");
+  $("model").replaceChildren(...info.models.map((m) => {
+    const ok = info.demo || info.providers[m.provider].has_key;
+    return el("option", { value: m.id, text: m.name + (ok ? "" : " (키 없음)") });
+  }));
+  $("model").value = load("model") || info.default_model;
+  $("lessons-from").append(...info.lesson_sources.map((r) =>
+    el("option", { value: r.run_id, text: `${r.run_id} · ${r.model_name} · ${r.steps}판단` })));
+  $("player").value = load("player") || "player";
+  if (info.demo) $("msg").textContent = "데모 모드: 게임·API 없이 가짜 판단, 잠금 없음";
+  poll();
+}
+
+// ----- 시작 · 중지 · 창 -----
+$("settings").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  showError("");
+  const seed = $("seed").value.trim();
+  save("player", $("player").value.trim()); save("model", $("model").value);
+  $("start").disabled = true;
+  try {
+    await api("/api/console/start", { method: "POST", body: {
+      player: $("player").value.trim(), model: $("model").value,
+      dry_run: document.querySelector('input[name="mode"]:checked').value === "dry",
+      steps: Number($("steps").value) || 50, guide: $("guide").checked,
+      lessons_from: $("lessons-from").value,
+      seed_mode: seed ? "fixed" : "random", seed,
+    }});
+  } catch (e) { showError(e.message); $("start").disabled = false; }
+});
+$("stop").addEventListener("click", () => api("/api/stop", { method: "POST" }).catch((e) => showError(e.message)));
+$("layout").addEventListener("click", async () => {
+  try {
+    const r = await api("/api/layout", { method: "POST" });
+    if (r.error) return showError(r.error);
+    const missing = [!r.game && "게임", !r.now && "지금 AI는", !r.console && "판단 기록"].filter(Boolean);
+    $("msg").textContent = missing.length ? `못 찾은 창: ${missing.join(", ")}` : "세 창을 배치했어요.";
+  } catch (e) { showError(e.message); }
+});
+$("focus").addEventListener("click", () =>
+  api("/api/focus", { method: "POST" }).then(() => { $("msg").textContent = "게임 창을 앞으로 가져왔어요."; })
+    .catch((e) => showError(e.message)));
+
+// ----- 개입 (힌트) -----
+const typing = (on) => api("/api/typing", { method: "POST", body: { on } }).catch(() => {});
+$("hint").addEventListener("focus", () => typing(true));
+$("hint").addEventListener("blur", () => typing(false));
+$("hintform").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const text = $("hint").value.trim();
+  if (!text) return;
+  try {
+    await api("/api/hint", { method: "POST", body: { text } });
+    $("hint").value = "";
+    $("hint").blur();  // 입력이 끝났으니 AI가 다시 진행한다
+  } catch (e) { showError(e.message); }
+});
+
+// ----- 판단 목록 · 상세 -----
+function select(index) {
+  if (!entries.length) return;
+  sel = Math.max(0, Math.min(entries.length - 1, index));
+  $("follow").checked = sel === entries.length - 1 && $("follow").checked;
+  fillEntryDetail(entries[sel], config, runId);
+  document.querySelectorAll(".item").forEach((node) => {
+    const on = Number(node.dataset.index) === sel;
+    node.classList.toggle("sel", on);
+    node.setAttribute("aria-selected", on);
+  });
+}
+
+function renderList() {
+  const rows = pending.map((text) => el("div", { class: "star pending", text: "⭐ 대기 · 다음 판단 때 전달: " + text }));
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    rows.push(el("button", { class: "item", type: "button", role: "option", "data-index": i, onclick: () => { $("follow").checked = i === entries.length - 1; select(i); } },
+      el("b", { text: `판단 ${e.step}` }),
+      entryKinds(e).filter((k) => k !== "hint").map((k) => el("span", { class: "tag " + k, text: KIND_LABEL[k] }))));
+    // 힌트는 이 판단 바로 전에 받은 것이라 판단 아래(더 이른 시점)에 끼운다
+    (e.hints || []).forEach((h) => rows.push(el("div", { class: "star", text: "⭐ 개발자 개입 · " + h })));
+  }
+  $("list").replaceChildren(...(rows.length ? rows : [el("div", { class: "empty", text: "시작하면 판단이 여기에 쌓여요." })]));
+}
+
+function render(s) {
+  if (s.status === "none") return;
+  if (s.run_id !== runId) {  // 새 판: 이번 응답은 지난 판 기준(since)이라 버리고, 다음에 처음부터 받는다
+    const first = runId === null;
+    runId = s.run_id; entries = []; pending = []; sel = -1;
+    renderList();
+    if (!first) return;
+  }
+  config = s.config;
+  running = s.status === "running";
+  $("fields").disabled = running;
+  $("start").disabled = running;
+  $("stop").disabled = !running;
+  $("focus").disabled = !running || config.demo;
+  $("hint").disabled = !running;
+  $("send").disabled = !running;
+  $("report").href = "/report?run=" + encodeURIComponent(runId);
+  if (s.status === "error") showError("오류로 멈췄어요: " + s.error);
+
+  const before = entries.length, pendingBefore = pending.join("\n");
+  entries = entries.concat(s.entries.filter((e) => !entries.length || e.step > entries[entries.length - 1].step));
+  pending = s.pending_hints;
+  $("hint-count").textContent = entries.reduce((n, e) => n + (e.hints ? e.hints.length : 0), 0) + pending.length;
+  if (entries.length !== before || pending.join("\n") !== pendingBefore) {
+    renderList();
+    if ($("follow").checked || sel < 0) select(entries.length - 1);
+    else select(sel);
+  }
+}
+
+async function poll() {
+  try {
+    const since = entries.length ? entries[entries.length - 1].step : 0;
+    render(await api("/api/state?since=" + since));
+  } catch (e) { /* 서버가 잠깐 안 될 때는 다음에 다시 */ }
+  setTimeout(poll, 1000);
+}
+
+$("prev").addEventListener("click", () => { $("follow").checked = false; select(sel - 1); });
+$("next").addEventListener("click", () => select(sel + 1));
+$("follow").addEventListener("change", () => { if ($("follow").checked) select(entries.length - 1); });
+init().catch((e) => showError("서버에 연결하지 못했어요: " + e.message));
+</script>
+</body>
+</html>

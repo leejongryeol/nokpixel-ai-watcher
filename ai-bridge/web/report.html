@@ -151,20 +151,7 @@ function select(index) {
   const e = run.entries[sel];
   document.querySelectorAll(".tick").forEach((t, i) => { t.classList.toggle("sel", i === sel); t.setAttribute("aria-selected", i === sel); });
   $("pos").textContent = `판단 ${e.step} / ${run.entries.length}`;
-  $("d-meta").replaceChildren(el("div", { class: "meta" },
-    el("span", { class: "tag cmd", text: `판단 ${e.step}` }),
-    entryKinds(e).map((k) => el("span", { class: "tag " + k, text: KIND_LABEL[k] })),
-    el("span", { text: e.time.replace("T", " ") })));
-  $("d-shot").src = `/shots/${encodeURIComponent(run.run_id)}/${encodeURIComponent(e.image)}`;
-  $("d-thought").textContent = e.thought || "(생각 없음)";
-  $("d-checkpoint").textContent = e.checkpoint ? "🔍 큰 점검 · " + e.checkpoint : "";
-  $("d-check").replaceChildren(...[checkLine(e)].filter(Boolean));
-  $("d-action").textContent = actionLabel(e, run.config) + (e.speech ? `  ·  💬 "${e.speech}"` : "");
-  $("d-goal").replaceChildren(e.goal ? el("span", {}, el("b", { text: "🗺️ 중간 목표 " }), e.goal + (e.goal_changed ? " (이때 바뀜)" : "")) : "");
-  $("d-extra").replaceChildren(
-    e.memo_add ? el("div", { style: "color: var(--teal)" }, el("b", { text: `📝 메모 추가 ${e.memo_add_id || ""} ` }), e.memo_add) : "",
-    e.memo_removed ? el("div", { style: "color: var(--teal)" }, el("b", { text: "🗑️ 메모 지움 " }), el("s", { text: e.memo_removed })) : "",
-    e.hints && e.hints.length ? el("div", { style: "color: var(--purple)" }, el("b", { text: "💡 받은 힌트 " }), e.hints.join(" / ")) : "");
+  fillEntryDetail(e, run.config, run.run_id);
 }
 
 function show(data) {

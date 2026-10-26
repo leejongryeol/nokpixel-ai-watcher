@@ -25,3 +25,4 @@ __pycache__/
 *.pyc
 .venv/
 ai-bridge/logs/
+ai-bridge/.app-profile/

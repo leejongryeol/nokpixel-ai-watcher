@@ -159,7 +159,7 @@ function select(index) {
   $("d-thought").textContent = e.thought || "(생각 없음)";
   $("d-checkpoint").textContent = e.checkpoint ? "🔍 큰 점검 · " + e.checkpoint : "";
   $("d-check").replaceChildren(...[checkLine(e)].filter(Boolean));
-  $("d-action").textContent = e.action_text + (e.speech ? `  ·  💬 "${e.speech}"` : "");
+  $("d-action").textContent = actionLabel(e, run.config) + (e.speech ? `  ·  💬 "${e.speech}"` : "");
   $("d-goal").replaceChildren(e.goal ? el("span", {}, el("b", { text: "🗺️ 중간 목표 " }), e.goal + (e.goal_changed ? " (이때 바뀜)" : "")) : "");
   $("d-extra").replaceChildren(
     e.memo_add ? el("div", { style: "color: var(--teal)" }, el("b", { text: `📝 메모 추가 ${e.memo_add_id || ""} ` }), e.memo_add) : "",

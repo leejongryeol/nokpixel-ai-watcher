@@ -123,7 +123,7 @@ const $ = (id) => document.getElementById(id);
 let lastStep = -1;
 let allEntries = [];
 
-function thoughtCard(entry, isLatest, isOld) {
+function thoughtCard(entry, isLatest, isOld, dryRun) {
   const kinds = entryKinds(entry);
   return el("div", { class: "card" + (isLatest ? " latest" : "") + (isOld ? " old" : "") },
     el("div", { class: "meta" },
@@ -133,7 +133,8 @@ function thoughtCard(entry, isLatest, isOld) {
     entry.checkpoint ? el("div", { class: "act", style: "color: #c9c4f0", text: "🔍 큰 점검 · " + entry.checkpoint }) : null,
     el("div", { class: "body", text: entry.thought || "(생각 없음)" }),
     checkLine(entry),
-    el("div", { class: "act" }, "→ ", el("b", { text: entry.action_text })),
+    el("div", { class: "act" }, "→ ", el("b", { text: entry.action_text }),
+      dryRun ? el("span", { class: "muted", text: " " + NOT_EXECUTED }) : null),
     entry.memo_add ? el("div", { class: "act", style: "color: var(--teal)", text: `📝 ${entry.memo_add_id || ""} ${entry.memo_add}` }) : null,
     entry.memo_removed ? el("div", { class: "act", style: "color: var(--teal); text-decoration: line-through", text: "🗑️ " + entry.memo_removed }) : null);
 }
@@ -190,18 +191,18 @@ function render(s) {
   const cards = [];
   recent.forEach((e, i) => {
     if (e.hints && e.hints.length) cards.push(hintCard(e));
-    cards.push(thoughtCard(e, i === recent.length - 1, i < recent.length - 3));
+    cards.push(thoughtCard(e, i === recent.length - 1, i < recent.length - 3, s.config.dry_run));
   });
   $("thoughts").replaceChildren(...cards);
   $("stepinfo").textContent = `판단 ${newest.step}번째 · ${newest.time.slice(11)}`;
 
   $("shot").src = `/shots/${encodeURIComponent(s.run_id)}/${encodeURIComponent(newest.image)}`;
-  $("shot-label").textContent = `판단 ${newest.step} · ${newest.action_text}`;
+  $("shot-label").textContent = `판단 ${newest.step} · ${actionLabel(newest, s.config)}`;
   $("bubble").textContent = newest.speech;
   $("bubble").classList.toggle("hidden", !newest.speech);
 
   $("goal").textContent = "🗺️ " + (s.goal || "(아직 없음)");
-  $("action").textContent = "🎮 " + newest.action_text;
+  $("action").textContent = "🎮 " + actionLabel(newest, s.config);
   const changes = allEntries.filter((e) => e.goal_changed);
   $("goal-count").textContent = changes.length + "회";
   const lastChange = changes[changes.length - 1];
@@ -211,7 +212,7 @@ function render(s) {
   $("check-count").textContent = allEntries.filter((e) => e.checkpoint).length + "회";
 
   const sent = [
-    "[최근 기록] 최근 판단 " + Math.min(5, allEntries.length - 1) + "개",
+    "[최근 기록] 최근 판단 " + Math.min(5, allEntries.length - 1) + "개" + (s.config.dry_run ? ", 행동마다 " + NOT_EXECUTED : ""),
     "[현재 중간 목표] " + (s.goal || "(아직 없음)"),
     s.memo.length ? "[기억 메모]\n" + s.memo.map((m) => `- ${m.id} (판단 ${m.step}에 적음): ${m.text}`).join("\n") : "[기억 메모] (없음)",
     newest.checkpoint ? "[큰 점검 · " + newest.checkpoint + "]" : null,

@@ -53,6 +53,12 @@ const KIND_LABEL = { hint: "개발자 힌트", goal: "중간 목표 변경", mem
   check: "큰 점검", guess: "근거: 추측", cmd: "행동" };
 const BASIS_ICON = { "화면": "👀 화면에서 봄", "기록": "📒 기록·메모", "추측": "❓ 추측" };
 
+// 생각만 하기 판의 행동 표시 (agent.py의 NOT_EXECUTED_MARK와 같은 글, AI 입력에도 붙는다)
+const NOT_EXECUTED = "(실제로 실행 안 됨)";
+function actionLabel(entry, config) {
+  return entry.action_text + (config && config.dry_run ? " " + NOT_EXECUTED : "");
+}
+
 // 생각 카드·리포트에 쓰는 되새김 한 줄
 function checkLine(entry) {
   if (!entry.check_goal && !entry.basis) return null;

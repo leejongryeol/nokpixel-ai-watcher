@@ -39,6 +39,7 @@ RECENT_LOG_SIZE = 5  # AI에게 보여줄 최근 판단 개수
 MEMO_LIMIT = 20  # 기억 메모 최대 줄 수
 CHECKPOINT_EVERY = 10  # 이 횟수마다 큰 점검
 CHECKPOINT_LOG_SIZE = 10  # 큰 점검 때 보여줄 최근 판단 개수
+NOT_EXECUTED_MARK = " (실제로 실행 안 됨)"  # 생각만 하기 판에서 최근 기록의 행동 뒤에 붙인다
 LESSONS_FILE = "lessons.md"  # 판이 끝나고 AI가 쓴 교훈
 INHERITED_FILE = "inherited_lessons.md"  # 판을 시작할 때 이어받은 교훈 (기록용 사본)
 FINAL_IMAGE = "final.png"  # 판이 끝난 뒤 화면 (마지막 행동의 결과, 교훈 쓰기에 사용)
@@ -640,10 +641,21 @@ class Agent:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     def _ask(self, client, system, image, hints, checkpoint):
+        content = [
+            ("text", self._prompt_text(hints, checkpoint) + "\n\n[현재 게임 화면]"),
+            ("image", image),
+            ("text", "생각을 쓰고 도구로 행동해라."),
+        ]
+        return client.ask(content, 2048, system=system, tools=TOOLS)
+
+    def _prompt_text(self, hints, checkpoint):
+        """판단 요청에 들어가는 글 부분 (최근 기록, 중간 목표, 기억 메모, 힌트, 큰 점검)."""
         recent = self.entries[-(CHECKPOINT_LOG_SIZE if checkpoint else RECENT_LOG_SIZE):]
+        # 생각만 하기 판에서 AI가 기록 속 행동을 실제로 했다고 믿지 않게 표시한다. 실제 조작 판의 형식은 그대로.
+        mark = NOT_EXECUTED_MARK if self.config["dry_run"] else ""
         if recent:
             history = "\n".join(
-                f"- 판단 {e['step']}: {e['thought'][:120]} → {e['action_text']}"
+                f"- 판단 {e['step']}: {e['thought'][:120]} → {e['action_text']}{mark}"
                 + (f" [근거: {e['basis']}]" if e.get("basis") else "")
                 for e in recent
             )
@@ -660,12 +672,7 @@ class Agent:
                      "① 지금까지 최종 목표(5층 보스 처치)에 가까워졌는가 "
                      "② 지금 중간 목표가 여전히 맞는가 "
                      "③ 기억 메모 중 근거가 약하거나 틀린 것은 없는가 (있으면 memo_remove)")
-        content = [
-            ("text", text + "\n\n[현재 게임 화면]"),
-            ("image", image),
-            ("text", "생각을 쓰고 도구로 행동해라."),
-        ]
-        return client.ask(content, 2048, system=system, tools=TOOLS)
+        return text
 
     # ----- 판이 끝난 뒤: 다음 판의 나에게 남기는 교훈 -----
     def _finish_with_lessons(self, client, final_status, image):

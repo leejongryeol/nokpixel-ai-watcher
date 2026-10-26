@@ -197,6 +197,7 @@ cd ai-bridge
 pip install -r requirements.txt
 python web.py --demo     # 게임·API 없이 화면만 둘러보기
 python web.py            # 실제 실행 (Windows, Claude API 키 필요)
+python web.py --panels   # 세 창 관찰 화면: 게임(입력 잠금) + 지금 AI는 + 판단 기록·개입
 ```
 자세한 내용: [ai-bridge/README.md](ai-bridge/README.md)
 
@@ -208,7 +209,7 @@ python web.py            # 실제 실행 (Windows, Claude API 키 필요)
 |---|---|
 | `core/`, `desktop/`, `SPD-classes/` … | 녹픽던 원본 게임 코드 (Java, v4.0.2 기준) |
 | `desktop/.../DesktopLauncher.java` | **수정**: 게임 창 720×400 고정 |
-| `ai-bridge/` | **추가**: AI 플레이어(`agent.py`), 관찰 웹 화면(`web.py`, `web/`), 명령줄 실행(`mvp.py`), 공략 문서(`guide.md`) |
+| `ai-bridge/` | **추가**: AI 플레이어(`agent.py`), 관찰 웹 화면(`web.py`, `web/`), 세 창 화면의 입력 잠금(`input_lock.py`)·창 배치(`window_layout.py`), 명령줄 실행(`mvp.py`), 공략 문서(`guide.md`) |
 | `docs/project/` | **추가**: 시스템 구조, 판단 요청과 숨길 정보, 진행도 이정표 |
 | `CLAUDE.md`, `.claude/settings.json` | **추가**: Claude Code(IntelliJ·VS Code)가 이 저장소에서 따르는 규칙, `.env` 읽기 금지 설정 |
 | `docs/images/` | **추가**: UI 화면 캡처 |

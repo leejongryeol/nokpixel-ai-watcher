@@ -47,7 +47,7 @@
 ## 시스템 구조
 
 ### 현재 (MVP)
-AI가 사람처럼 **게임 화면을 보고 키보드·마우스로 조작**합니다. 게임 코드는 창 크기·화면 배율 고정 외에 건드리지 않았습니다.
+AI가 사람처럼 **게임 화면을 보고 키보드·마우스로 조작**합니다. 게임 코드는 창 크기·화면 배율 고정과 캐릭터 선택 뒤 "AI 설정" 장면 추가 외에 건드리지 않았습니다 (게임 규칙은 그대로).
 
 ```
 ┌──────────────────────┐   ① 스크린샷    ┌──────────────────────────┐   ② 이미지 + 글   ┌──────────────┐
@@ -75,7 +75,7 @@ AI가 사람처럼 **게임 화면을 보고 키보드·마우스로 조작**합
 
 ### 다음 단계 (예정)
 게임 코드에 연결 지점을 추가해 **판단 요청 시점**(`Hero.ready()`)과 **게임 속 글 정보**(체력, 층, 주변 적, 가방)를 직접 받아올 예정입니다.
-캐릭터 선택 뒤 게임 안 "AI 설정" 장면과 게임 ↔ Python 약속: [docs/project/bridge.md](docs/project/bridge.md) (설계, 아직 만들지 않음)
+캐릭터 선택 뒤 게임 안 "AI 설정" 장면과 게임 ↔ Python 약속: [docs/project/bridge.md](docs/project/bridge.md) (장면은 만듦, Python 연결은 예정)
 
 자세한 내용: [docs/project/architecture.md](docs/project/architecture.md)
 
@@ -186,6 +186,8 @@ AI에게 숨길 정보(C그룹: 안 가본 맵, 미감정 아이템의 정체 �
 - ✅ 게임 창 세로 3단계 크기, AI 사진 360×640 고정 (1080 모니터에서 확인, 1440·768 모니터는 미확인)
 - ✅ 던전 1층에서 생각만 모드 3번: AI가 받은 사진 360×640 확인 ([테스트 결과](docs/test-results/test-results-2026-10-31.txt))
 - ⚠️ 이전 기록(10/25·10/26, 가로 720×400)과는 AI가 본 화면 조건이 달라서 화면 읽기 결과를 그대로 비교하지 않아요
+- ✅ 캐릭터 선택 → **AI 설정 장면** → 던전. 값(공략·판 방식·최대 판단·플레이어)은 기억하고 API 키는 가려서 받은 뒤 버림. [AI 없이 시작]은 원작과 같은 시드로 같은 1층 확인
+- ⬜ AI 설정 장면 ↔ Python 연결 (지금은 [AI 없이 시작]만 쓸 수 있어요)
 
 ## 실행 방법
 
@@ -226,6 +228,8 @@ python web.py --panels   # 두 창 관찰 화면: 게임(입력 잠금) + 관찰
 |---|---|
 | `core/`, `desktop/`, `SPD-classes/` … | 녹픽던 원본 게임 코드 (Java, v4.0.2 기준) |
 | `desktop/.../DesktopLauncher.java` | **수정**: 게임 창 세로 3단계 크기(720×1280 / 540×960 / 360×640), 모바일 화면·배율 고정 |
+| `core/.../scenes/AISetupScene.java` | **추가**: 캐릭터 선택 뒤 AI 설정 장면 ([bridge.md](docs/project/bridge.md)) |
+| `core/.../scenes/HeroSelectScene.java`, `SPDSettings.java`, `messages/scenes/scenes*.properties`, `SPD-classes/.../TextInput.java` | **수정**: [시작] → AI 설정 장면, AI 설정 값 기억, 문구, 키 입력 가리기 |
 | `ai-bridge/` | **추가**: AI 플레이어(`agent.py`), 관찰 웹 화면(`web.py`, `web/`), 두 창 화면의 입력 잠금(`input_lock.py`)·창 배치(`window_layout.py`), 명령줄 실행(`mvp.py`), 공략 문서(`guide.md`) |
 | `docs/project/` | **추가**: 시스템 구조, 판단 요청과 숨길 정보, 진행도 이정표 |
 | `CLAUDE.md`, `.claude/settings.json` | **추가**: Claude Code(IntelliJ·VS Code)가 이 저장소에서 따르는 규칙, `.env` 읽기 금지 설정 |

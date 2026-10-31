@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>판단 기록 · 녹픽셀</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&family=Nanum+Gothic+Coding:wght@400;700&display=swap">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  body { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; height: 100%; overflow: hidden; }
+  .body { flex: 1; min-height: 0; display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 10px; }
+  .list { overflow: auto; display: flex; flex-direction: column; gap: 4px; padding: 6px; }
+  .item { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 6px 8px; border-radius: 6px; border: 1px solid transparent; background: none; color: var(--text); font-size: 13px; text-align: left; cursor: pointer; }
+  .item:hover { border-color: var(--line); }
+  .item.sel { border-color: var(--accent); background: var(--accent-soft); }
+  .item .tag { font-size: 11px; padding: 1px 5px; }
+  .star { padding: 5px 8px; border-radius: 6px; background: var(--purple-bg); border: 1px dashed #8d77b8; color: var(--purple); font-size: 12.5px; line-height: 1.4; }
+  .star.pending { opacity: 0.75; }
+  .detail { overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+  .detail img { flex: 1 1 0; min-height: 200px; width: 100%; object-fit: contain; object-position: left top; border-radius: 8px; image-rendering: pixelated; }
+  .nav { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+  .nav .btn { height: 30px; padding: 0 10px; font-size: 13px; }
+</style>
+</head>
+<body>
+  <p id="error" class="notice error hidden" style="margin: 0; padding: 6px 10px; font-size: 13px"></p>
+  <div class="body">
+    <section class="panel" style="display: flex; flex-direction: column; min-height: 0; padding: 8px">
+      <div class="panel-title" style="margin: 0 0 4px 4px">판단 기록 (최신이 위)</div>
+      <div id="list" class="list" role="listbox" aria-label="판단 목록"><div class="empty">시작하면 판단이 여기에 쌓여요.</div></div>
+    </section>
+    <section class="panel detail">
+      <div class="nav">
+        <button id="prev" class="btn" type="button" aria-label="이전 판단">◀ 이전</button>
+        <button id="next" class="btn" type="button" aria-label="다음 판단">다음 ▶</button>
+        <label><input id="follow" type="checkbox" checked> 최신 따라가기</label>
+        <span class="grow" style="flex: 1"></span>
+        <a id="report" class="help" href="/report" target="_blank" rel="noopener">리포트 열기</a>
+        <button id="close" class="btn" type="button">닫기</button>
+      </div>
+      <div id="d-meta"></div>
+      <div id="d-goal" style="font-size: 14px"></div>
+      <div style="font-size: 15px; line-height: 1.6"><b>🧠 생각</b> — <span id="d-thought"></span></div>
+      <div id="d-checkpoint" style="font-size: 13px; color: #c9c4f0"></div>
+      <div style="font-size: 14px"><b>🎮 행동</b> <span id="d-action"></span></div>
+      <div id="d-check"></div>
+      <div id="d-extra" style="font-size: 13px; display: flex; flex-direction: column; gap: 4px"></div>
+      <img id="d-shot" alt="그 판단 때 AI가 본 게임 화면">
+    </section>
+  </div>
+
+<script src="/static/common.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+let runId = null, config = null, entries = [], pending = [], sel = -1;
+let wanted = Number(new URLSearchParams(location.search).get("step")) || 0;  // 패널에서 누른 판단
+
+function showError(text) { $("error").textContent = text; $("error").classList.toggle("hidden", !text); }
+
+function select(index) {
+  if (!entries.length) return;
+  sel = Math.max(0, Math.min(entries.length - 1, index));
+  $("follow").checked = sel === entries.length - 1 && $("follow").checked;
+  fillEntryDetail(entries[sel], config, runId);
+  document.querySelectorAll(".item").forEach((node) => {
+    const on = Number(node.dataset.index) === sel;
+    node.classList.toggle("sel", on);
+    node.setAttribute("aria-selected", on);
+  });
+}
+
+function renderList() {
+  const rows = pending.map((text) => el("div", { class: "star pending", text: "⭐ 대기 · 다음 판단 때 전달: " + text }));
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    rows.push(el("button", { class: "item", type: "button", role: "option", "data-index": i, onclick: () => { $("follow").checked = i === entries.length - 1; select(i); } },
+      el("b", { text: `판단 ${e.step}` }),
+      entryKinds(e).filter((k) => k !== "hint").map((k) => el("span", { class: "tag " + k, text: KIND_LABEL[k] }))));
+    // 힌트는 이 판단 바로 전에 받은 것이라 판단 아래(더 이른 시점)에 끼운다
+    (e.hints || []).forEach((h) => rows.push(el("div", { class: "star", text: "⭐ 개발자 개입 · " + h })));
+  }
+  $("list").replaceChildren(...(rows.length ? rows : [el("div", { class: "empty", text: "시작하면 판단이 여기에 쌓여요." })]));
+}
+
+function render(s) {
+  if (s.status === "none") return;
+  if (s.run_id !== runId) {  // 새 판: 이번 응답은 지난 판 기준(since)이라 버리고, 다음에 처음부터 받는다
+    const first = runId === null;
+    runId = s.run_id; entries = []; pending = []; sel = -1;
+    renderList();
+    if (!first) return;
+  }
+  config = s.config;
+  $("report").href = "/report?run=" + encodeURIComponent(runId);
+
+  const before = entries.length, pendingBefore = pending.join("\n");
+  entries = entries.concat(s.entries.filter((e) => !entries.length || e.step > entries[entries.length - 1].step));
+  pending = s.pending_hints;
+  if (entries.length !== before || pending.join("\n") !== pendingBefore) {
+    renderList();
+    const index = wanted ? entries.findIndex((e) => e.step === wanted) : -1;
+    if (index >= 0) { wanted = 0; $("follow").checked = index === entries.length - 1; select(index); }
+    else if ($("follow").checked || sel < 0) select(entries.length - 1);
+    else select(sel);
+  }
+}
+
+async function poll() {
+  try {
+    const since = entries.length ? entries[entries.length - 1].step : 0;
+    render(await api("/api/state?since=" + since));
+  } catch (e) { /* 서버가 잠깐 안 될 때는 다음에 다시 */ }
+  setTimeout(poll, 1000);
+}
+
+$("prev").addEventListener("click", () => { $("follow").checked = false; select(sel - 1); });
+$("next").addEventListener("click", () => select(sel + 1));
+$("follow").addEventListener("change", () => { if ($("follow").checked) select(entries.length - 1); });
+$("close").addEventListener("click", () => window.close());
+// 이미 열린 기록 창에서 패널이 다른 판단을 누르면
+window.addEventListener("message", (event) => {
+  if (event.origin !== location.origin || !event.data || !event.data.step) return;
+  const index = entries.findIndex((e) => e.step === event.data.step);
+  if (index >= 0) { $("follow").checked = index === entries.length - 1; select(index); }
+});
+// 기록 창을 닫으면 게임 창을 다시 맨 앞으로 (실행 중이 아니면 서버가 무시한다)
+window.addEventListener("pagehide", () => navigator.sendBeacon("/api/focus"));
+poll();
+</script>
+</body>
+</html>

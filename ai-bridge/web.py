@@ -2,10 +2,10 @@
 
 실행: python web.py          → 브라우저에서 http://127.0.0.1:8765 이 열린다
       python web.py --demo   → 게임·API 없이 가짜 판단으로 화면만 확인
-      python web.py --panels → 세 창 관찰 화면: 지금 AI는(/now) + 판단 기록·개입(/console)을 앱 창으로 띄우고 게임과 함께 배치
+      python web.py --panels → 관찰 패널(/panel)을 앱 창으로 띄우고 게임 창 오른쪽에 배치
 
 화면 흐름: ① 실험 설정(/) → ② 관찰 화면(/observe) → ③ 관찰 리포트(/report)
-세 창 화면: 창1 게임(실행 중 사람 입력 잠금) / 창2 지금 AI는(/now) / 창3 판단 기록·개입(/console)
+두 창 화면: 게임(실행 중 사람 입력 잠금) / 관찰 패널(/panel). 판단별 상세는 패널에서 여는 기록 창(/log)
 이 서버는 내 컴퓨터(127.0.0.1)에서만 접속할 수 있다.
 """
 
@@ -50,14 +50,14 @@ def page_report():
     return send_from_directory(WEB_DIR, "report.html")
 
 
-@app.get("/now")
-def page_now():
-    return send_from_directory(WEB_DIR, "now.html")
+@app.get("/panel")
+def page_panel():
+    return send_from_directory(WEB_DIR, "panel.html")
 
 
-@app.get("/console")
-def page_console():
-    return send_from_directory(WEB_DIR, "console.html")
+@app.get("/log")
+def page_log():
+    return send_from_directory(WEB_DIR, "log.html")
 
 
 @app.get("/shots/<run_id>/<name>")
@@ -101,7 +101,7 @@ def start():
 
 @app.post("/api/console/start")
 def console_start():
-    """세 창 화면(창3)에서 시작: .env에 쓰지 않고, 실행 중에는 게임 창의 사람 입력을 잠근다."""
+    """관찰 패널에서 시작: .env에 쓰지 않고, 실행 중에는 게임 창의 사람 입력을 잠근다."""
     return _start_agent(request.get_json(force=True), save_env=False, lock_input=True)
 
 
@@ -147,7 +147,7 @@ def get_state():
     a = current()
     if not a:
         return jsonify({"status": "none"})
-    since = request.args.get("since", type=int)  # 세 창 화면은 새 판단만 받아 간다
+    since = request.args.get("since", type=int)  # 관찰 패널·기록 창은 새 판단만 받아 간다
     if since is not None:
         return jsonify(a.snapshot(since=since))
     return jsonify(a.snapshot(last=1000))  # 글만 보내므로 판단 1000개도 가볍다
@@ -237,7 +237,7 @@ def main():
     parser.add_argument("--demo", action="store_true", help="게임·API 없이 가짜 판단으로 화면 확인")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true", help="브라우저를 자동으로 열지 않음")
-    parser.add_argument("--panels", action="store_true", help="세 창 관찰 화면(지금 AI는 + 판단 기록·개입)을 앱 창으로 띄우고 배치")
+    parser.add_argument("--panels", action="store_true", help="관찰 패널을 앱 창으로 띄우고 게임 창 옆에 배치")
     args = parser.parse_args()
 
     load_dotenv(ENV_PATH)
@@ -248,7 +248,7 @@ def main():
     print("끄려면 이 창에서 Ctrl + C")
     if args.panels:
         def open_and_arrange():
-            window_layout.open_panels(url)
+            window_layout.open_panel(url)
             window_layout.arrange_when_ready()
         threading.Timer(1.0, open_and_arrange).start()
     elif not args.no_browser:

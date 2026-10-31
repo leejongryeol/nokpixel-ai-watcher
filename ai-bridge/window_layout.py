@@ -1,7 +1,7 @@
-"""세 창 배치 - 게임(왼쪽 위) / 지금 AI는(게임 아래) / 판단 기록(오른쪽)을 정해진 자리에 놓는다 (Windows 전용)
+"""두 창 배치 - 게임(왼쪽 위) / 관찰 패널(오른쪽 나머지)을 정해진 자리에 놓는다 (Windows 전용)
 
 작업 표시줄을 뺀 영역(SPI_GETWORKAREA) 안에 놓는다. 게임 창은 옮기기만 하고 크기는 바꾸지 않는다.
-창2·창3은 Edge(없으면 Chrome)의 앱 창(--app, 주소창·탭 없음)으로 띄운다.
+관찰 패널은 Edge(없으면 Chrome)의 앱 창(--app, 주소창·탭 없음)으로 띄운다.
 """
 
 import os
@@ -15,8 +15,7 @@ import webbrowser
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROFILE_DIR = os.path.join(HERE, ".app-profile")  # 앱 창 전용 브라우저 프로필 (GitHub에 올리지 않음)
 GAME_WINDOW_TITLE = "Shattered Pixel Dungeon"
-NOW_TITLE = "지금 AI는 · 녹픽셀"  # web/now.html의 <title>
-CONSOLE_TITLE = "판단 기록 · 녹픽셀"  # web/console.html의 <title>
+PANEL_TITLE = "관찰 패널 · 녹픽셀"  # web/panel.html의 <title>
 DEFAULT_GAME_SIZE = (722, 440)  # 게임 창을 못 찾았을 때 비워 둘 자리 (125% 배율 기준 실제 픽셀)
 BROWSERS = [
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
@@ -93,7 +92,7 @@ def _place(hwnd, x, y, w=None, h=None):
 
 
 def arrange():
-    """세 창을 자리에 놓는다. 무엇을 놓았는지 돌려준다."""
+    """두 창을 자리에 놓는다. 무엇을 놓았는지 돌려준다."""
     if sys.platform != "win32":
         return {"error": "창 배치는 Windows에서만 돼요."}
     ctypes, wintypes, user32 = _win()
@@ -104,13 +103,13 @@ def arrange():
     my_thread = ctypes.windll.kernel32.GetCurrentThreadId()
     user32.AttachThreadInput(my_thread, fg_thread, True)
     try:
-        _arrange_three(user32, left, top, right, bottom, result)
+        _arrange_two(user32, left, top, right, bottom, result)
     finally:
         user32.AttachThreadInput(my_thread, fg_thread, False)
     return result
 
 
-def _arrange_three(user32, left, top, right, bottom, result):
+def _arrange_two(user32, left, top, right, bottom, result):
     game = user32.FindWindowW(None, GAME_WINDOW_TITLE)
     game_w, game_h = DEFAULT_GAME_SIZE
     if game:
@@ -119,27 +118,20 @@ def _arrange_three(user32, left, top, right, bottom, result):
         game_w, game_h = visible.right - visible.left, visible.bottom - visible.top
     result["game"] = bool(game)
 
-    now = find_window(NOW_TITLE)
-    if now:
-        _place(now, left, top + game_h, game_w, bottom - top - game_h)
-    result["now"] = bool(now)
-
-    console = find_window(CONSOLE_TITLE)
-    if console:
-        _place(console, left + game_w, top, right - left - game_w, bottom - top)
-    result["console"] = bool(console)
+    panel = find_window(PANEL_TITLE)
+    if panel:
+        _place(panel, left + game_w, top, right - left - game_w, bottom - top)
+    result["panel"] = bool(panel)
 
 
-def open_panels(base_url):
-    """창2·창3을 앱 창으로 띄운다. 쓴 브라우저 이름 (없으면 보통 브라우저 탭으로 열고 None)."""
+def open_panel(base_url):
+    """관찰 패널을 앱 창으로 띄운다. 쓴 브라우저 이름 (없으면 보통 브라우저 탭으로 열고 None)."""
     browser = next((path for path in BROWSERS if os.path.exists(path)), None) or shutil.which("msedge")
     if not browser:
-        webbrowser.open(base_url + "/console")
-        webbrowser.open(base_url + "/now")
+        webbrowser.open(base_url + "/panel")
         return None
-    for path in ("/console", "/now"):
-        subprocess.Popen([browser, f"--app={base_url}{path}", f"--user-data-dir={PROFILE_DIR}",
-                          "--no-first-run", "--no-default-browser-check"])
+    subprocess.Popen([browser, f"--app={base_url}/panel", f"--user-data-dir={PROFILE_DIR}",
+                      "--no-first-run", "--no-default-browser-check"])
     return os.path.basename(browser)
 
 
@@ -148,7 +140,7 @@ def arrange_when_ready(timeout=15.0):
     def wait_and_arrange():
         deadline = time.time() + timeout
         while time.time() < deadline:
-            if find_window(NOW_TITLE) and find_window(CONSOLE_TITLE):
+            if find_window(PANEL_TITLE):
                 time.sleep(0.5)
                 break
             time.sleep(0.5)

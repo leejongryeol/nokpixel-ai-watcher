@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>관찰 패널 · 녹픽셀</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&family=Nanum+Gothic+Coding:wght@400;700&display=swap">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  body { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; height: 100%; overflow: auto; }
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13px; }
+  .bar .grow { flex: 1; }
+  .pill { padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); white-space: nowrap; font-weight: 700; }
+  .pill.lock { background: var(--red-bg); color: var(--red); border-color: transparent; }
+  .pill.unlock { color: var(--amber); }
+  .light { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .light::before { content: ""; width: 10px; height: 10px; border-radius: 999px; background: var(--muted); }
+  .light.green::before { background: #5fc27a; }
+  .light.yellow::before { background: #f2c27a; }
+  .light.red::before { background: var(--red-strong); }
+  .goals { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 13px; }
+  .goals dt { color: var(--muted); }
+  .goals dd { margin: 0; font-weight: 700; }
+  .now { flex: 1 1 180px; min-height: 140px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+  .thought { flex: 1; min-height: 0; overflow: auto; font-size: 19px; line-height: 1.6; }
+  .row { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 14px; }
+  .row b { color: var(--muted); font-weight: 500; margin-right: 4px; }
+  .soonbox { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; }
+  .soonbox span.s { padding: 3px 8px; border: 1px dashed var(--line); border-radius: 6px; }
+  .recent { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; }
+  .recent .head { display: flex; align-items: center; gap: 8px; }
+  .recent .head .btn { height: 30px; padding: 0 10px; font-size: 13px; margin-left: auto; }
+  .list { display: flex; flex-direction: column; gap: 3px; max-height: 190px; overflow: auto; }
+  .item { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 4px 8px; border-radius: 6px; border: 1px solid transparent; background: none; color: var(--text); font-size: 13px; text-align: left; cursor: pointer; }
+  .item:hover { border-color: var(--line); }
+  .item .act { color: var(--text-soft); }
+  .item .tag { font-size: 11px; padding: 1px 5px; }
+  .star { padding: 4px 8px; border-radius: 6px; background: var(--purple-bg); border: 1px dashed #8d77b8; color: var(--purple); font-size: 12.5px; line-height: 1.4; }
+  .star.pending { opacity: 0.75; }
+  .hintform { display: flex; flex-direction: column; gap: 6px; }
+  .hintform .row { display: flex; gap: 8px; }
+  .hintform input { flex: 1; height: 40px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-deep); color: var(--text); font-size: 14px; }
+  .hintform button { height: 40px; padding: 0 16px; border-radius: 8px; border: none; background: var(--purple-btn); color: #fff; font-weight: 700; font-size: 14px; cursor: pointer; }
+  .hintform button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .buttons .btn { height: 34px; padding: 0 12px; font-size: 13px; }
+  .settings summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+  .settings fieldset { border: none; padding: 0; margin: 8px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: 13px; }
+  .settings label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .settings select, .settings input[type=text], .settings input[type=number] { height: 32px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-deep); color: var(--text); font-size: 13px; }
+  .settings input[type=number] { width: 70px; }
+  .settings .buttons { margin-top: 8px; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <span id="status" class="status none">실험 없음</span>
+    <span id="mode" class="pill">—</span>
+    <span id="lock" class="pill">—</span>
+    <span class="grow"></span>
+    <span class="mono">판단 <b id="step">—</b> / <span id="steps-max">—</span></span>
+  </div>
+  <div class="bar">
+    <span class="mono">비용 <b id="cost">—</b></span>
+    <span class="grow"></span>
+    <span>게임 창</span><span id="light" class="light">—</span>
+  </div>
+  <p id="note" class="notice error hidden" style="margin: 0; padding: 6px 10px; font-size: 13px"></p>
+
+  <dl class="goals panel" style="margin: 0">
+    <dt>최종 목표</dt><dd>지하 5층 보스 "구(Goo)" 처치</dd>
+    <dt>중간 목표</dt><dd id="goal">—</dd>
+  </dl>
+
+  <section class="now panel">
+    <div class="panel-title" style="margin: 0">지금 생각 <span id="when" class="mono"></span></div>
+    <div id="thought" class="thought">—</div>
+    <div class="row"><span><b>행동</b><span id="action">—</span></span></div>
+    <div class="row"><span><b>근거</b><span id="basis">—</span></span><span id="check" class="muted"></span></div>
+  </section>
+
+  <section class="soon soonbox" aria-label="준비 중인 항목">
+    <span class="s">큰 점검 알림</span><span class="s">제자리 경고</span><span class="s">개입 뒤 AI 반응</span>
+    <span class="s">체력 —/—</span><span class="s">층 —</span><span class="s">배고픔 —</span><span class="s">새 몬스터 —</span>
+    <span class="s">진행도 —/51점</span><span class="s">보스 처치 —</span><span class="soon-tag">준비 중</span>
+  </section>
+
+  <section class="recent panel">
+    <div class="head">
+      <span class="panel-title" style="margin: 0">최근 판단 (최신이 위)</span>
+      <button id="open-log" class="btn" type="button">기록 창 열기</button>
+    </div>
+    <div id="list" class="list" role="list" aria-label="최근 판단"><div class="empty">시작하면 판단이 여기에 쌓여요.</div></div>
+  </section>
+
+  <form id="hintform" class="hintform panel">
+    <label for="hint" class="panel-title" style="margin: 0; color: var(--purple); font-weight: 700">개발자 개입 · 다음 판단 때 AI에게 전달 (힌트만, 조종 불가)</label>
+    <div class="row">
+      <input id="hint" type="text" placeholder="힌트를 입력하세요" autocomplete="off" disabled>
+      <button id="send" type="submit" disabled>보내기</button>
+    </div>
+    <span class="help" style="font-size: 12px">이번 판 개입 <b id="hint-count">0</b>회 · 입력하는 동안 AI는 다음 판단을 기다려요 (최대 60초)
+      <span class="soon" style="margin-left: 8px">개입 뒤 AI 반응 강조 <span class="soon-tag">준비 중</span></span></span>
+  </form>
+
+  <div class="buttons">
+    <button id="stop" class="btn danger" type="button" disabled>■ 중지</button>
+    <button id="layout" class="btn" type="button">⊞ 창 배치</button>
+    <button id="focus" class="btn" type="button" disabled>게임 창 앞으로</button>
+    <span id="msg" class="help"></span>
+  </div>
+  <p id="error" class="notice error hidden" style="margin: 0; padding: 6px 10px; font-size: 13px"></p>
+
+  <details id="setup" class="settings panel" open>
+    <summary>실험 설정 (실행 중에는 접혀요)</summary>
+    <form id="settings">
+      <fieldset id="fields">
+        <label>플레이어 <input id="player" type="text" size="8" autocomplete="off"></label>
+        <label>모델 <select id="model"></select></label>
+        <span role="radiogroup" aria-label="방식" style="display: inline-flex; gap: 10px">
+          <label><input type="radio" name="mode" value="dry" checked> 생각만</label>
+          <label><input type="radio" name="mode" value="live"> 실제 조작</label>
+        </span>
+        <label>최대 판단 <input id="steps" type="number" min="1" max="500" value="50"></label>
+        <label><input id="guide" type="checkbox"> 공략 제공</label>
+        <label>교훈 이어받기 <select id="lessons-from"><option value="">없음</option></select></label>
+        <label>시드 <input id="seed" type="text" size="10" placeholder="무작위" autocomplete="off"></label>
+      </fieldset>
+      <div class="buttons">
+        <button id="start" class="btn primary" type="submit">▶ 시작</button>
+        <span class="soon" style="display: inline-flex; gap: 8px; align-items: center; font-size: 13px">
+          <label><input type="checkbox" disabled> 한 번만 실행</label>
+          <label>판단 간격 <input type="number" disabled style="width: 50px"> 초</label>
+          <label>비용 상한 $<input type="number" disabled style="width: 60px"></label>
+          <span class="soon-tag">준비 중</span>
+        </span>
+      </div>
+    </form>
+  </details>
+
+<script src="/static/common.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const RECENT = 5;  // 패널에 보여 줄 최근 판단 수 (전부는 기록 창에서)
+let info = null, runId = null, config = null, entries = [], pending = [], running = null, logWindow = null;
+
+function save(key, value) { try { localStorage.setItem("console." + key, value); } catch (e) {} }
+function load(key) { try { return localStorage.getItem("console." + key) || ""; } catch (e) { return ""; } }
+function showError(text) { $("error").textContent = text; $("error").classList.toggle("hidden", !text); }
+
+async function init() {
+  info = await api("/api/setup-info");
+  $("model").replaceChildren(...info.models.map((m) => {
+    const ok = info.demo || info.providers[m.provider].has_key;
+    return el("option", { value: m.id, text: m.name + (ok ? "" : " (키 없음)") });
+  }));
+  $("model").value = load("model") || info.default_model;
+  $("lessons-from").append(...info.lesson_sources.map((r) =>
+    el("option", { value: r.run_id, text: `${r.run_id} · ${r.model_name} · ${r.steps}판단` })));
+  $("player").value = load("player") || "player";
+  if (info.demo) $("msg").textContent = "데모 모드: 게임·API 없이 가짜 판단, 잠금 없음";
+  poll();
+}
+
+// ----- 시작 · 중지 · 창 -----
+$("settings").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  showError("");
+  const seed = $("seed").value.trim();
+  save("player", $("player").value.trim()); save("model", $("model").value);
+  $("start").disabled = true;
+  try {
+    await api("/api/console/start", { method: "POST", body: {
+      player: $("player").value.trim(), model: $("model").value,
+      dry_run: document.querySelector('input[name="mode"]:checked').value === "dry",
+      steps: Number($("steps").value) || 50, guide: $("guide").checked,
+      lessons_from: $("lessons-from").value,
+      seed_mode: seed ? "fixed" : "random", seed,
+    }});
+  } catch (e) { showError(e.message); $("start").disabled = false; }
+});
+$("stop").addEventListener("click", () => api("/api/stop", { method: "POST" }).catch((e) => showError(e.message)));
+$("layout").addEventListener("click", async () => {
+  try {
+    const r = await api("/api/layout", { method: "POST" });
+    if (r.error) return showError(r.error);
+    const missing = [!r.game && "게임", !r.panel && "관찰 패널"].filter(Boolean);
+    $("msg").textContent = [missing.length ? `못 찾은 창: ${missing.join(", ")}` : "두 창을 배치했어요.", r.warning].filter(Boolean).join(" · ");
+  } catch (e) { showError(e.message); }
+});
+$("focus").addEventListener("click", () =>
+  api("/api/focus", { method: "POST" }).then(() => { $("msg").textContent = "게임 창을 앞으로 가져왔어요."; })
+    .catch((e) => showError(e.message)));
+
+// 기록 창: 이 패널 자리에 같은 크기로 띄운다 (게임 창을 가리지 않게)
+function openLog(step) {
+  const url = "/log" + (step ? "?step=" + step : "");
+  const features = `popup,left=${window.screenX},top=${window.screenY},width=${window.outerWidth},height=${window.outerHeight}`;
+  if (logWindow && !logWindow.closed) {
+    if (step) logWindow.postMessage({ step }, location.origin);  // 주소를 바꾸면 닫힘(pagehide)으로 처리돼 게임 창이 튀어나오므로 알리기만 한다
+    logWindow.focus();
+    return;
+  }
+  logWindow = window.open(url, "nokpixel-log", features);
+}
+$("open-log").addEventListener("click", () => openLog());
+
+// ----- 개입 (힌트) -----
+const typing = (on) => api("/api/typing", { method: "POST", body: { on } }).catch(() => {});
+$("hint").addEventListener("focus", () => typing(true));
+$("hint").addEventListener("blur", () => typing(false));
+$("hintform").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const text = $("hint").value.trim();
+  if (!text) return;
+  try {
+    await api("/api/hint", { method: "POST", body: { text } });
+    $("hint").value = "";
+    $("hint").blur();  // 입력이 끝났으니 AI가 다시 진행한다
+  } catch (e) { showError(e.message); }
+});
+
+// ----- 화면 갱신 -----
+function light(s) {
+  if (s.status !== "running") return ["red", s.status === "finished" ? "끝남" : s.status === "stopped" ? "중지됨" : "멈춤"];
+  if (s.focus_waiting) return ["yellow", "게임 창을 기다리는 중"];
+  if (s.typing) return ["yellow", "힌트 입력 중이라 기다리는 중"];
+  if (s.phase === "thinking" || s.phase === "capture") return ["yellow", "AI가 생각하는 중"];
+  if (s.game_front === null) return ["", "데모 · 게임 창 없음"];
+  return s.game_front ? ["green", "입력 가능"] : ["yellow", "게임 창이 뒤에 있음"];
+}
+
+function renderList() {
+  const rows = pending.map((text) => el("div", { class: "star pending", text: "⭐ 대기 · 다음 판단 때 전달: " + text }));
+  for (const e of entries.slice(-RECENT).reverse()) {
+    rows.push(el("button", { class: "item", type: "button", role: "listitem", title: "기록 창에서 자세히 보기", onclick: () => openLog(e.step) },
+      el("b", { text: `판단 ${e.step}` }),
+      el("span", { class: "act", text: actionLabel(e, config) }),
+      entryKinds(e).filter((k) => k !== "hint").map((k) => el("span", { class: "tag " + k, text: KIND_LABEL[k] }))));
+    // 힌트는 이 판단 바로 전에 받은 것이라 판단 아래(더 이른 시점)에 끼운다
+    (e.hints || []).forEach((h) => rows.push(el("div", { class: "star", text: "⭐ 개발자 개입 · " + h })));
+  }
+  $("list").replaceChildren(...(rows.length ? rows : [el("div", { class: "empty", text: "시작하면 판단이 여기에 쌓여요." })]));
+}
+
+function renderNow(s) {
+  const c = s.config;
+  setStatus($("status"), s.status);
+  $("mode").textContent = c.demo ? "데모" : c.dry_run ? "생각만" : "실제 조작";
+  const lock = $("lock");
+  if (c.demo) { lock.className = "pill"; lock.textContent = "데모: 잠금 없음"; }
+  else if (s.locked) { lock.className = "pill lock"; lock.textContent = "🔒 게임 입력 잠김"; }
+  else if (s.lock_used && s.status === "running") { lock.className = "pill unlock"; lock.textContent = "🔓 잠금 꺼짐"; }
+  else { lock.className = "pill"; lock.textContent = "🔓 잠금 없음"; }
+  $("step").textContent = s.step || "—";
+  $("steps-max").textContent = c.steps;
+  $("cost").textContent = money(s.total_cost);
+  const [color, text] = light(s);
+  $("light").className = "light " + color;
+  $("light").textContent = text;
+  const notes = [s.lock_note, s.status === "error" ? s.error : ""].filter(Boolean);
+  $("note").textContent = notes.join(" / ");
+  $("note").classList.toggle("hidden", !notes.length);
+
+  $("goal").textContent = s.goal || "—";
+  const latest = entries[entries.length - 1];
+  if (!latest) return;
+  $("when").textContent = `· 판단 ${latest.step}`;
+  $("thought").textContent = latest.thought || "(생각 없음)";
+  $("action").textContent = actionLabel(latest, c);
+  $("basis").textContent = latest.basis ? (BASIS_ICON[latest.basis] || latest.basis) : "—";
+  $("check").textContent = latest.check_goal ? "🎯 " + latest.check_goal : "";
+}
+
+function render(s) {
+  if (s.status === "none") return;
+  if (s.run_id !== runId) {  // 새 판: 이번 응답은 지난 판 기준(since)이라 버리고, 다음에 처음부터 받는다
+    const first = runId === null;
+    runId = s.run_id; entries = []; pending = [];
+    renderList();
+    if (!first) return;
+  }
+  config = s.config;
+  const nowRunning = s.status === "running";
+  if (nowRunning !== running) $("setup").open = !nowRunning;  // 시작하면 접고, 끝나면 다시 편다
+  running = nowRunning;
+  $("fields").disabled = running;
+  $("start").disabled = running;
+  $("stop").disabled = !running;
+  $("focus").disabled = !running || config.demo;
+  $("hint").disabled = !running;
+  $("send").disabled = !running;
+  if (s.status === "error") showError("오류로 멈췄어요: " + s.error);
+
+  const before = entries.length, pendingBefore = pending.join("\n");
+  entries = entries.concat(s.entries.filter((e) => !entries.length || e.step > entries[entries.length - 1].step));
+  pending = s.pending_hints;
+  $("hint-count").textContent = entries.reduce((n, e) => n + (e.hints ? e.hints.length : 0), 0) + pending.length;
+  if (entries.length !== before || pending.join("\n") !== pendingBefore) renderList();
+  renderNow(s);
+}
+
+async function poll() {
+  try {
+    const since = entries.length ? entries[entries.length - 1].step : 0;
+    render(await api("/api/state?since=" + since));
+  } catch (e) { /* 서버가 잠깐 안 될 때는 다음에 다시 */ }
+  setTimeout(poll, 1000);
+}
+
+init().catch((e) => showError("서버에 연결하지 못했어요: " + e.message));
+</script>
+</body>
+</html>

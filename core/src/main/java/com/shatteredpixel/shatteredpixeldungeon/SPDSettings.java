@@ -477,4 +477,61 @@ public class SPDSettings extends GameSettings {
 	public static int fulLScreenMonitor(){
 		return getInt( KEY_FULLSCREEN_MONITOR, 0 );
 	}
+
+	//[nokpixel-ai-watcher] AI 설정 장면에서 고른 값 (다음 판에 채워 둔다). API 키는 저장하지 않는다
+
+	public static final String KEY_AI_MODEL         = "ai_model";
+	public static final String KEY_AI_GUIDE         = "ai_guide";
+	public static final String KEY_AI_DRY_RUN       = "ai_dry_run";
+	public static final String KEY_AI_STEPS         = "ai_steps";
+	public static final String KEY_AI_LESSONS_FROM  = "ai_lessons_from";
+	public static final String KEY_AI_PLAYER        = "ai_player";
+
+	public static void aiModel( String value ){
+		put( KEY_AI_MODEL, value );
+	}
+
+	public static String aiModel(){
+		return getString( KEY_AI_MODEL, "" );
+	}
+
+	public static void aiGuide( boolean value ){
+		put( KEY_AI_GUIDE, value );
+	}
+
+	public static boolean aiGuide(){
+		return getBoolean( KEY_AI_GUIDE, false );
+	}
+
+	public static void aiDryRun( boolean value ){
+		put( KEY_AI_DRY_RUN, value );
+	}
+
+	public static boolean aiDryRun(){
+		return getBoolean( KEY_AI_DRY_RUN, true );
+	}
+
+	public static void aiSteps( int value ){
+		put( KEY_AI_STEPS, value );
+	}
+
+	public static int aiSteps(){
+		return getInt( KEY_AI_STEPS, 50, 1, 500 );
+	}
+
+	public static void aiLessonsFrom( String value ){
+		put( KEY_AI_LESSONS_FROM, value );
+	}
+
+	public static String aiLessonsFrom(){
+		return getString( KEY_AI_LESSONS_FROM, "" );
+	}
+
+	public static void aiPlayer( String value ){
+		put( KEY_AI_PLAYER, value );
+	}
+
+	public static String aiPlayer(){
+		return getString( KEY_AI_PLAYER, "player", 16 );
+	}
 }

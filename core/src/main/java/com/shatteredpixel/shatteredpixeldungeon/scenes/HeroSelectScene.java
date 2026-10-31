@@ -154,13 +154,8 @@ public class HeroSelectScene extends PixelScene {
 
 				if (GamesInProgress.selectedClass == null) return;
 
-				Dungeon.hero = null;
-				Dungeon.daily = Dungeon.dailyReplay = false;
-				Dungeon.initSeed();
-				ActionIndicator.clearAction();
-				InterlevelScene.mode = InterlevelScene.Mode.DESCEND;
-
-				Game.switchScene( InterlevelScene.class );
+				//[nokpixel-ai-watcher] 원래 시작 순서는 AI 설정 장면의 [AI 없이 시작]으로 옮겼다
+				ShatteredPixelDungeon.switchScene( AISetupScene.class );
 			}
 		};
 		startBtn.icon(Icons.get(Icons.ENTER));

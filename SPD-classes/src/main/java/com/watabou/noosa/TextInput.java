@@ -171,6 +171,12 @@ public class TextInput extends Component {
 		textField.setMaxLength(maxLength);
 	}
 
+	//[nokpixel-ai-watcher] API 키 입력용: 입력한 글자를 *로 가린다. 기본은 꺼짐
+	public void setPasswordMode(boolean on){
+		textField.setPasswordCharacter('*');
+		textField.setPasswordMode(on);
+	}
+
 	public String getText(){
 		return textField.getText();
 	}

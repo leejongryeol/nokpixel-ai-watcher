@@ -26,7 +26,7 @@
   .navbtn { width: 40px; height: 36px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-deep); color: var(--text); font-size: 16px; cursor: pointer; }
   .row3 { display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
   .detail { border-color: var(--accent); display: flex; flex-direction: column; gap: 10px; }
-  .detail img { width: 100%; aspect-ratio: 720 / 400; object-fit: contain; background: #000; border-radius: 8px; image-rendering: pixelated; }
+  .detail img { width: 100%; max-height: min(640px, 70vh); object-fit: contain; background: #000; border-radius: 8px; image-rendering: pixelated; }
   .list { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-family: var(--font-mono); line-height: 1.5; }
   .list .s { color: var(--muted); }
   select { height: 40px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 0 10px; font-size: 14px; max-width: 420px; }

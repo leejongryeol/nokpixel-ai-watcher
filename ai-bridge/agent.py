@@ -34,7 +34,9 @@ LOGS_DIR = os.path.join(HERE, "logs")
 GUIDE_PATH = os.path.join(HERE, "guide.md")
 
 GAME_WINDOW_TITLE = "Shattered Pixel Dungeon"
-AI_IMAGE_SIZE = (720, 400)  # AI에게 보내는 이미지 크기 (게임 창 고정 크기와 같음)
+AI_IMAGE_SIZE = (360, 640)  # AI에게 보내는 이미지 크기. 게임 창이 더 크면 줄여서 보낸다
+# 게임 창 크기 (DesktopLauncher.java의 AI_WINDOW_PRESETS와 같은 값). 모두 시야 180x320을 배율 4/3/2로 그린다
+DISPLAY_PRESETS = {"1440": (720, 1280), "1080": (540, 960), "768": (360, 640)}
 RECENT_LOG_SIZE = 5  # AI에게 보여줄 최근 판단 개수
 MEMO_LIMIT = 20  # 기억 메모 최대 줄 수
 CHECKPOINT_EVERY = 10  # 이 횟수마다 큰 점검
@@ -300,6 +302,7 @@ class WindowsGame:
         if not self.hwnd:
             raise RuntimeError(f'"{GAME_WINDOW_TITLE}" 창을 찾지 못했어요. 게임을 먼저 실행하세요.')
         self.geometry = (0, 0, 1.0, 1.0)
+        self.window_size = None  # 마지막으로 찍은 게임 창 안쪽 크기 (config.json 기록용)
         self.stop_event = None  # 에이전트의 중지 신호 (게임 창을 기다리는 중에도 중지할 수 있게)
         self.waiting_focus = False  # 게임 창을 맨 앞으로 가져오지 못해 기다리는 중
 
@@ -394,8 +397,9 @@ class WindowsGame:
                 raise RuntimeError("게임 창을 찍지 못했어요. 게임 창이 최소화돼 있거나 다른 창에 가려져 있어요.")
             image = self.ImageGrab.grab(bbox=box, all_screens=True).convert("RGB")
         self.geometry = (box[0], box[1], image.width / AI_IMAGE_SIZE[0], image.height / AI_IMAGE_SIZE[1])
-        if image.size != AI_IMAGE_SIZE:
-            image = image.resize(AI_IMAGE_SIZE)
+        self.window_size = image.size
+        if image.size != AI_IMAGE_SIZE:  # 칸 평균으로 줄인다 (픽셀 그림이 덜 뭉개짐)
+            image = image.resize(AI_IMAGE_SIZE, self.Image.BOX)
         return image
 
     def execute(self, action):
@@ -452,15 +456,17 @@ class DemoGame:
 
         self.Image, self.ImageDraw = Image, ImageDraw
         self.step = 0
+        self.window_size = None
 
     def capture(self):
+        width, height = AI_IMAGE_SIZE
         image = self.Image.new("RGB", AI_IMAGE_SIZE, (22, 20, 15))
         draw = self.ImageDraw.Draw(image)
         rnd = random.Random(self.step)
         for _ in range(60):  # 던전처럼 보이는 바닥 타일
-            x, y = rnd.randrange(0, 720, 16), rnd.randrange(0, 400, 16)
+            x, y = rnd.randrange(0, width, 16), rnd.randrange(0, height, 16)
             draw.rectangle([x, y, x + 15, y + 15], fill=(58, 52, 42))
-        hx, hy = 344 + (self.step % 5) * 16, 184
+        hx, hy = width // 2 - 40 + (self.step % 5) * 16, height // 2
         draw.rectangle([hx, hy, hx + 15, hy + 15], fill=(224, 164, 74))
         draw.text((12, 12), f"DEMO  step {self.step + 1}", fill=(236, 230, 216))
         self.step += 1
@@ -592,8 +598,7 @@ class Agent:
     # ----- 실행 -----
     def run(self):
         os.makedirs(self.run_dir, exist_ok=True)
-        with open(os.path.join(self.run_dir, "config.json"), "w", encoding="utf-8") as f:
-            json.dump(self.config, f, ensure_ascii=False, indent=2)
+        self._save_config()
         if self.inherited_lessons:  # 어떤 교훈을 받고 시작했는지 이 판 폴더에도 남긴다
             with open(os.path.join(self.run_dir, INHERITED_FILE), "w", encoding="utf-8") as f:
                 f.write(self.inherited_lessons + "\n")
@@ -625,6 +630,8 @@ class Agent:
                 self.step = step
                 self.phase = "capture"
                 image = game.capture()
+                if step == 1:  # 실제로 찍은 게임 창 크기를 기록에 남긴다
+                    self._record_display(game)
                 image_name = f"step_{step:03d}.png"
                 image.save(os.path.join(self.run_dir, image_name))
 
@@ -660,6 +667,21 @@ class Agent:
                 image = self._capture_final(game) or image
             self._finish_with_lessons(client, final_status, image)
         self.status = final_status
+
+    def _save_config(self):
+        with open(os.path.join(self.run_dir, "config.json"), "w", encoding="utf-8") as f:
+            json.dump(self.config, f, ensure_ascii=False, indent=2)
+
+    def _record_display(self, game):
+        """화면 설정(1440/1080/768), 게임 창 크기, AI 사진 크기를 config.json에 더한다.
+        이 항목이 없는 기록은 이전 방식(가로 720x400 창, 사진 720x400)이다."""
+        size = game.window_size
+        if self.config["demo"]:
+            display = "데모"
+        else:
+            display = next((name for name, preset in DISPLAY_PRESETS.items() if preset == size), "기타")
+        self.config.update(display=display, game_window=list(size) if size else None, ai_image=list(AI_IMAGE_SIZE))
+        self._save_config()
 
     def _wait_while_typing(self):
         while time.time() < self._typing_until and not self._stop.is_set():

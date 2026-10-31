@@ -12,11 +12,13 @@ import threading
 import time
 import webbrowser
 
+from agent import DISPLAY_PRESETS
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROFILE_DIR = os.path.join(HERE, ".app-profile")  # 앱 창 전용 브라우저 프로필 (GitHub에 올리지 않음)
 GAME_WINDOW_TITLE = "Shattered Pixel Dungeon"
 PANEL_TITLE = "관찰 패널 · 녹픽셀"  # web/panel.html의 <title>
-DEFAULT_GAME_SIZE = (722, 440)  # 게임 창을 못 찾았을 때 비워 둘 자리 (125% 배율 기준 실제 픽셀)
+TITLE_BAR = 40  # 게임 창 제목 표시줄 높이 어림값 (게임 창을 못 찾았을 때 비워 둘 자리 계산용)
 BROWSERS = [
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
     r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
@@ -109,13 +111,25 @@ def arrange():
     return result
 
 
+def expected_game_size(work_height):
+    """게임 창을 못 찾았을 때 비워 둘 크기: 게임이 이 화면에서 고를 크기 (DesktopLauncher와 같은 규칙을 작업 영역 기준으로)."""
+    for width, height in DISPLAY_PRESETS.values():  # 큰 것부터
+        if height + TITLE_BAR <= work_height:
+            return width, height + TITLE_BAR
+    width, height = DISPLAY_PRESETS["768"]
+    return width, height + TITLE_BAR
+
+
 def _arrange_two(user32, left, top, right, bottom, result):
     game = user32.FindWindowW(None, GAME_WINDOW_TITLE)
-    game_w, game_h = DEFAULT_GAME_SIZE
+    game_w, game_h = expected_game_size(bottom - top)
     if game:
         _place(game, left, top)
         _, visible = _margins(game)
         game_w, game_h = visible.right - visible.left, visible.bottom - visible.top
+        if game_h > bottom - top:
+            result["warning"] = ("게임 창이 작업 표시줄에 가려요. 게임을 끄고 "
+                                 'gradlew.bat desktop:debug --args="--display=768"처럼 더 작은 크기로 실행하세요.')
     result["game"] = bool(game)
 
     panel = find_window(PANEL_TITLE)

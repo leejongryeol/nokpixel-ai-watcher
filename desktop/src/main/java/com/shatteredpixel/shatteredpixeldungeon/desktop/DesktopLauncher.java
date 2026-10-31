@@ -47,9 +47,30 @@ import java.util.Locale;
 
 public class DesktopLauncher {
 
-	// [nokpixel-ai-watcher] AI 관찰용 고정 창 크기
-	public static final int AI_WINDOW_WIDTH = 720;
-	public static final int AI_WINDOW_HEIGHT = 400;
+	// [nokpixel-ai-watcher] AI 관찰용 세로(9:16) 고정 창 크기. {모니터 세로 해상도, 창 가로, 창 세로, 배율}
+	// 창 ÷ 배율이 모두 180x320이라 세 크기의 시야(보이는 칸 수)가 같다. ai-bridge/agent.py의 DISPLAY_PRESETS와 같은 값.
+	private static final int[][] AI_WINDOW_PRESETS = {
+			{1440, 720, 1280, 4},
+			{1080, 540, 960, 3},
+			{768, 360, 640, 2},
+	};
+	private static final int AI_WINDOW_MARGIN = 120; // 제목 표시줄 + 작업 표시줄 여유
+
+	// 실행 옵션 --display=1440|1080|768 이 있으면 그 크기, 없으면 모니터 세로 해상도에 들어가는 가장 큰 크기
+	private static int[] aiWindowPreset( String[] args ){
+		for (String arg : args){
+			if (arg.startsWith("--display=")){
+				for (int[] preset : AI_WINDOW_PRESETS){
+					if (arg.equals("--display=" + preset[0])) return preset;
+				}
+			}
+		}
+		int screenHeight = Lwjgl3ApplicationConfiguration.getDisplayMode().height;
+		for (int[] preset : AI_WINDOW_PRESETS){
+			if (preset[2] + AI_WINDOW_MARGIN <= screenHeight) return preset;
+		}
+		return AI_WINDOW_PRESETS[AI_WINDOW_PRESETS.length - 1];
+	}
 
 	public static void main (String[] args) {
 
@@ -176,15 +197,19 @@ public class DesktopLauncher {
 		SPDSettings.set( new Lwjgl3Preferences( new Lwjgl3FileHandle(basePath + SPDSettings.DEFAULT_PREFS_FILE, baseFileType) ));
 		FileUtils.setDefaultFileProperties( baseFileType, basePath );
 		
-		// [nokpixel-ai-watcher] AI 관찰용: 창 크기를 720x400으로 고정한다.
-		// AI에게 보내는 스크린샷 크기(=토큰 비용)를 일정하게 유지하기 위함.
-		// 720x400은 게임이 허용하는 최소 크기이며, 이때 화면은 2배 확대로 그려진다.
+		// [nokpixel-ai-watcher] AI 관찰용: 창을 세로(9:16) 고정 크기로 띄운다.
+		// 모바일 화면 배치와 배율을 함께 고정해야 세 크기의 시야가 같다.
+		// (그냥 두면 PC용 넓은 화면이 켜지거나 모니터 밀도에 따라 배율이 달라진다. PixelScene.create() 참고)
 		// SPDSettings.fullscreen()은 화면 갱신(platform, Gdx.app)까지 부르는데 둘 다 아직 없으므로 값만 저장한다.
+		int[] preset = aiWindowPreset( args );
+		int windowWidth = preset[1], windowHeight = preset[2];
 		SPDSettings.put( SPDSettings.KEY_FULLSCREEN, false );
 		SPDSettings.windowMaximized( false );
-		SPDSettings.windowResolution( new Point( AI_WINDOW_WIDTH, AI_WINDOW_HEIGHT ) );
-		config.setWindowSizeLimits( AI_WINDOW_WIDTH, AI_WINDOW_HEIGHT, AI_WINDOW_WIDTH, AI_WINDOW_HEIGHT );
-		config.setWindowedMode( AI_WINDOW_WIDTH, AI_WINDOW_HEIGHT );
+		SPDSettings.windowResolution( new Point( windowWidth, windowHeight ) );
+		SPDSettings.interfaceSize( 0 );
+		SPDSettings.scale( preset[3] );
+		config.setWindowSizeLimits( windowWidth, windowHeight, windowWidth, windowHeight );
+		config.setWindowedMode( windowWidth, windowHeight );
 		config.setResizable( false );
 
 		config.setMaximized( false );

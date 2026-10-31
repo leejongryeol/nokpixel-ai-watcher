@@ -86,6 +86,18 @@ function fillEntryDetail(e, config, runId) {
     e.hints && e.hints.length ? el("div", { style: "color: var(--purple)" }, el("b", { text: "💡 받은 힌트 " }), e.hints.join(" / ")) : "");
 }
 
+// AI가 받은 사진 크기. config.json에 ai_image가 없으면 이전 방식(가로 720x400 창을 그대로)
+function imageSizeText(config) {
+  const size = config && config.ai_image;
+  return size ? `${size[0]} × ${size[1]}` : "720 × 400";
+}
+
+function displayText(config) {
+  if (!config.ai_image) return "720×400 (이전 방식)";
+  if (!config.game_window) return config.display || "-";
+  return `${config.display} · 창 ${config.game_window.join("×")} → 사진 ${config.ai_image.join("×")}`;
+}
+
 function configChips(container, config) {
   container.replaceChildren(...[
     el("span", { class: "chip" }, "플레이어 · ", el("b", { text: config.player || "-" })),
@@ -93,6 +105,7 @@ function configChips(container, config) {
     el("span", { class: "chip" }, "공략 · ", el("b", { text: config.guide ? "제공" : "없이" })),
     config.lessons_from ? el("span", { class: "chip" }, "교훈 · ", el("b", { text: "이어받음" })) : null,
     el("span", { class: "chip mono" }, "시드 · " + (config.seed || "무작위")),
+    el("span", { class: "chip mono" }, "화면 · " + displayText(config)),
     config.dry_run ? el("span", { class: "chip" }, el("b", { text: "생각만 (조작 안 함)" })) : null,
     config.demo ? el("span", { class: "chip" }, el("b", { text: "데모" })) : null,
   ].filter(Boolean));

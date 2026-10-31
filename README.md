@@ -75,6 +75,7 @@ AI가 사람처럼 **게임 화면을 보고 키보드·마우스로 조작**합
 
 ### 다음 단계 (예정)
 게임 코드에 연결 지점을 추가해 **판단 요청 시점**(`Hero.ready()`)과 **게임 속 글 정보**(체력, 층, 주변 적, 가방)를 직접 받아올 예정입니다.
+캐릭터 선택 뒤 게임 안 "AI 설정" 장면과 게임 ↔ Python 약속: [docs/project/bridge.md](docs/project/bridge.md) (설계, 아직 만들지 않음)
 
 자세한 내용: [docs/project/architecture.md](docs/project/architecture.md)
 

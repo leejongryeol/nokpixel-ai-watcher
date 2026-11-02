@@ -291,6 +291,10 @@ class StopRequested(Exception):
     """게임 창을 기다리는 중에 관찰자가 중지를 누름."""
 
 
+class PauseRequested(Exception):
+    """행동하는 중에 관찰자가 일시정지를 누름: 남은 키는 보내지 않는다."""
+
+
 class WindowsGame:
     def __init__(self):
         if sys.platform != "win32":
@@ -424,12 +428,16 @@ class WindowsGame:
                     if self.guard:
                         self.guard()
                     self._require_focus()
+                    if self.guard:  # 게임 창을 기다리는 동안 멈췄을 수 있다
+                        self.guard()
                     self.pyautogui.press(key)
                     time.sleep(0.15)
         elif action["tool"] == "click":
             if self.guard:
                 self.guard()
             self._require_focus()
+            if self.guard:
+                self.guard()
             left, top, scale_x, scale_y = self.geometry
             x = int(left + action["input"]["x"] * scale_x)
             y = int(top + action["input"]["y"] * scale_y)
@@ -548,6 +556,8 @@ class Agent:
         self.total_tokens = 0
         self._hints = []
         self._stop = threading.Event()
+        self._paused = threading.Event()
+        self._pause = None  # 지금 일시정지 기록 {"step", "from", "discarded_cost_usd"}
         self._lock = threading.Lock()
         self._thread = None
         # 게임에서 시작한 판의 게임 상태 (⑥ 판 끝, ⑦ 살아 있음 신호)
@@ -573,6 +583,25 @@ class Agent:
     def stop(self):
         self._typing_until = 0.0
         self._stop.set()
+        if self.input_lock is not None:  # AI 모델 응답을 기다리는 중이어도 잠금은 바로 푼다
+            self.input_lock.stop()
+
+    def pause(self):
+        """일시정지: 키 보내기를 멈추고 입력 잠금을 바로 풀어 사람이 조작할 수 있게 한다. 판은 끝나지 않는다."""
+        if self.status != "running" or self._stop.is_set() or self._paused.is_set():
+            return False
+        self._pause = {"step": self.step, "from": datetime.now().isoformat(timespec="seconds"), "discarded_cost_usd": 0.0}
+        self._paused.set()
+        if self.input_lock is not None:
+            self.input_lock.stop()
+        return True
+
+    def resume(self):
+        """재개: 다음 판단부터 이어 간다. 입력 잠금은 실행 스레드가 다시 건다."""
+        if not self._paused.is_set():
+            return False
+        self._paused.clear()
+        return True
 
     def end_game(self, reason, depth=None):
         """판 끝(⑥ 또는 멈춤 장치): 바로 키 보내기를 멈추고 입력 잠금을 푼다. 처음 받은 이유만 남긴다."""
@@ -581,8 +610,6 @@ class Agent:
         if depth is not None:
             self.depth = depth
         self.stop()
-        if self.input_lock is not None:  # AI 모델 응답을 기다리는 중이어도 잠금은 바로 푼다
-            self.input_lock.stop()
 
     def heartbeat(self, alive, depth):
         """⑦ 게임이 1초마다 보내는 살아 있음 신호."""
@@ -599,6 +626,8 @@ class Agent:
         while True:
             if self._stop.is_set():
                 raise StopRequested()
+            if self._paused.is_set():
+                raise PauseRequested()
             if not self._watch_game:
                 return
             if not self._hero_alive:
@@ -638,6 +667,7 @@ class Agent:
         game = self.game
         return {
             "phase": self.phase,
+            "paused": self._paused.is_set(),
             "typing": time.time() < self._typing_until,
             "game_front": game.is_front() if hasattr(game, "is_front") else None,
             "focus_waiting": bool(getattr(game, "waiting_focus", False)),
@@ -716,8 +746,10 @@ class Agent:
                 client = LLM(self.config["model"])
             system = self.system_prompt()
 
-            for step in range(1, self.config["steps"] + 1):
+            step = 1
+            while step <= self.config["steps"]:
                 self._wait_while_typing()
+                self._wait_while_paused(game)
                 if self._stop.is_set():
                     final_status = "stopped"
                     break
@@ -739,14 +771,22 @@ class Agent:
                 else:
                     thought, action, usage = self._ask(client, system, image, hints, checkpoint)
 
+                if self._paused.is_set() and not self._stop.is_set():
+                    # 생각하는 동안 일시정지: 사람이 조작해 화면이 바뀌므로 이 판단은 버리고, 재개 뒤 같은 번호로 다시 생각한다
+                    self._discard(usage, hints)
+                    continue
                 self._record(step, image_name, thought, action, usage, hints, checkpoint)
                 if self._stop.is_set():  # 생각하는 동안 판이 끝났으면 행동하지 않는다
                     final_status = "stopped"
                     break
                 self.phase = "acting"
                 if not self.config["dry_run"]:
-                    game.execute(action)
+                    try:
+                        game.execute(action)
+                    except PauseRequested:  # 남은 키는 보내지 않고, 재개 뒤 다음 판단으로 넘어간다
+                        pass
                 time.sleep(WAIT_AFTER_ACTION)
+                step += 1
         except StopRequested:
             final_status = "stopped"
         except Exception as error:  # 관찰 화면에 오류를 보여주기 위해 모두 잡는다
@@ -793,6 +833,39 @@ class Agent:
             display = next((name for name, preset in DISPLAY_PRESETS.items() if preset == size), "기타")
         self.config.update(display=display, game_window=list(size) if size else None, ai_image=list(AI_IMAGE_SIZE))
         self._save_config()
+
+    def _wait_while_paused(self, game):
+        """일시정지 동안 기다린다. 재개하면 게임 창을 앞으로 가져오고 입력 잠금을 다시 건다.
+        멈춘 시간은 config.json의 pauses에 남긴다 (그동안 사람이 조작했을 수 있으므로)."""
+        if not self._paused.is_set():
+            return
+        while self._paused.is_set() and not self._stop.is_set():
+            self.phase = "paused"
+            time.sleep(0.2)
+        pause, self._pause = self._pause, None
+        if pause:
+            pause["to"] = datetime.now().isoformat(timespec="seconds")
+            pause["discarded_cost_usd"] = round(pause["discarded_cost_usd"], 6)
+            self.config.setdefault("pauses", []).append(pause)
+            self._save_config()
+        if self._stop.is_set():
+            return
+        if hasattr(game, "focus"):
+            game.focus()
+        if self.input_lock is not None:
+            self.input_lock.start(game.hwnd)
+
+    def _discard(self, usage, hints):
+        """일시정지로 버린 판단: 기록(log.jsonl)에는 남기지 않고, 든 비용만 합계와 config.json의 pauses에 더한다.
+        받은 힌트는 다음 판단에 다시 준다."""
+        price_in, price_out = MODELS[self.config["model"]]["price"]
+        cost = (usage["input_tokens"] * price_in + usage["output_tokens"] * price_out) / 1_000_000
+        with self._lock:
+            self.total_cost += cost
+            self.total_tokens += usage["input_tokens"] + usage["output_tokens"]
+            self._hints = hints + self._hints
+        if self._pause is not None:
+            self._pause["discarded_cost_usd"] += cost
 
     def _wait_while_typing(self):
         while time.time() < self._typing_until and not self._stop.is_set():

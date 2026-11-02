@@ -102,6 +102,7 @@
   </form>
 
   <div class="buttons">
+    <button id="pause" class="btn" type="button" disabled>⏸ 일시정지</button>
     <button id="stop" class="btn danger" type="button" disabled>■ 중지</button>
     <button id="layout" class="btn" type="button">⊞ 창 배치</button>
     <button id="focus" class="btn" type="button" disabled>게임 창 앞으로</button>
@@ -145,8 +146,15 @@ function renderSetup(s) {
   $("waiting").classList.toggle("hidden", !p);
 }
 
-// ----- 중지 · 창 -----
-$("stop").addEventListener("click", () => api("/api/stop", { method: "POST" }).catch((e) => showError(e.message)));
+// ----- 일시정지 · 중지 · 창 -----
+// 일시정지: 입력 잠금이 풀려 사람이 조작할 수 있고, 재개하면 같은 판이 다음 판단부터 이어진다. 중지: 판이 끝난다
+let paused = false;
+$("pause").addEventListener("click", () =>
+  api("/api/pause", { method: "POST", body: { on: !paused } }).catch((e) => showError(e.message)));
+$("stop").addEventListener("click", () => {
+  if (!confirm("판을 끝낼까요? 끝낸 판은 이어 갈 수 없어요.\n(잠깐 멈추려면 ⏸ 일시정지)")) return;
+  api("/api/stop", { method: "POST" }).catch((e) => showError(e.message));
+});
 $("layout").addEventListener("click", async () => {
   try {
     const r = await api("/api/layout", { method: "POST" });
@@ -195,6 +203,7 @@ function light(s) {
     const reason = s.config.ended_reason;
     return ["red", reason ? END_LABEL[reason] || reason : s.status === "finished" ? "끝남" : s.status === "stopped" ? "중지됨" : "멈춤"];
   }
+  if (s.paused) return ["yellow", "일시정지 · 사람이 조작할 수 있어요"];
   if (s.phase === "waiting_game") return ["yellow", "게임 신호를 기다리는 중 (층 이동 등)"];
   if (s.focus_waiting) return ["yellow", "게임 창을 기다리는 중"];
   if (s.typing) return ["yellow", "힌트 입력 중이라 기다리는 중"];
@@ -223,6 +232,7 @@ function renderNow(s) {
   const lock = $("lock");
   if (c.demo) { lock.className = "pill"; lock.textContent = "데모: 잠금 없음"; }
   else if (s.locked) { lock.className = "pill lock"; lock.textContent = "🔒 게임 입력 잠김"; }
+  else if (s.paused) { lock.className = "pill unlock"; lock.textContent = "⏸ 일시정지 · 잠금 풀림"; }
   else if (s.lock_used && s.status === "running") { lock.className = "pill unlock"; lock.textContent = "🔓 잠금 꺼짐"; }
   else { lock.className = "pill"; lock.textContent = "🔓 잠금 없음"; }
   $("step").textContent = s.step || "—";
@@ -256,6 +266,9 @@ function render(s) {
   }
   config = s.config;
   running = s.status === "running";
+  paused = running && !!s.paused;
+  $("pause").disabled = !running;
+  $("pause").textContent = paused ? "▶ 재개" : "⏸ 일시정지";
   $("stop").disabled = !running;
   $("focus").disabled = !running || config.demo;
   $("hint").disabled = !running;

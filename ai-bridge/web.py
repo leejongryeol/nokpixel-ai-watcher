@@ -432,6 +432,20 @@ def stop():
     return jsonify({"ok": True})
 
 
+@app.post("/api/pause")
+@bridge_only
+def pause():
+    """일시정지 / 재개. 일시정지하면 입력 잠금이 바로 풀려 사람이 조작할 수 있다."""
+    a = current()
+    if not a or a.status != "running":
+        return jsonify({"error": "진행 중인 실험이 없어요."}), 400
+    if body().get("on"):
+        a.pause()
+    else:
+        a.resume()
+    return jsonify({"ok": True})
+
+
 # ---------------- 리포트 ----------------
 @app.get("/api/runs")
 def runs():

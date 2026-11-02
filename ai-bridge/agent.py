@@ -219,15 +219,17 @@ def _openai_tool(tool):
 class LLM:
     """모델 하나를 부르는 창구. content는 ("text", 글) / ("image", PIL 이미지) 목록."""
 
-    def __init__(self, model):
+    def __init__(self, model, timeout=None):
+        """timeout(초)을 주면 다시 시도하지 않고 그 시간 안에 끝낸다 (연결 시험용)."""
         self.model = model if model in MODELS else DEFAULT_MODEL
         self.provider = MODELS[self.model]["provider"]
+        options = {"timeout": timeout, "max_retries": 0} if timeout else {}
         if self.provider == "openai":
             import openai
-            self.client = openai.OpenAI()
+            self.client = openai.OpenAI(**options)
         else:
             import anthropic
-            self.client = anthropic.Anthropic()
+            self.client = anthropic.Anthropic(**options)
 
     def ask(self, content, max_tokens, system=None, tools=None):
         """(글, 도구 호출 {"tool", "input"} 또는 None, 토큰 사용량)을 돌려준다."""
@@ -492,7 +494,7 @@ class Agent:
     """한 판의 실험을 실행한다. start()로 백그라운드 실행, stop()으로 중지."""
 
     def __init__(self, player="player", model=DEFAULT_MODEL, guide=False, seed="", steps=50,
-                 dry_run=False, demo=False, lessons_from="", lock_input=False):
+                 dry_run=False, demo=False, lessons_from="", lock_input=False, game_run=None):
         lessons_from = os.path.basename(lessons_from or "")
         self.inherited_lessons = load_lessons(lessons_from)
         self.config = {
@@ -507,6 +509,8 @@ class Agent:
             "demo": bool(demo),
             "started_at": datetime.now().isoformat(timespec="seconds"),
         }
+        if game_run:  # 게임의 AI 설정에서 시작한 판: 캐릭터·제약·시드는 기록에만 남긴다 (AI 입력에는 넣지 않음)
+            self.config.update(game_run, started_from="game")
         safe_player = "".join(c for c in self.config["player"] if c.isalnum() or c in "-_") or "player"
         self.run_id = datetime.now().strftime("run_%Y%m%d_%H%M%S_") + safe_player
         self.run_dir = os.path.join(LOGS_DIR, self.run_id)
@@ -595,10 +599,14 @@ class Agent:
                 "entries": entries,
             }
 
-    # ----- 실행 -----
-    def run(self):
+    def prepare(self):
+        """시작하기 전에 기록 폴더와 config.json만 만든다 (게임의 AI 설정에서 판을 준비할 때)."""
         os.makedirs(self.run_dir, exist_ok=True)
         self._save_config()
+
+    # ----- 실행 -----
+    def run(self):
+        self.prepare()
         if self.inherited_lessons:  # 어떤 교훈을 받고 시작했는지 이 판 폴더에도 남긴다
             with open(os.path.join(self.run_dir, INHERITED_FILE), "w", encoding="utf-8") as f:
                 f.write(self.inherited_lessons + "\n")

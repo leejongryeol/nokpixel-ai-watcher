@@ -17,9 +17,12 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 
+// 서버는 이 헤더가 있는 요청만 받는다 (다른 웹사이트가 몰래 보내는 요청 막기, bridge.md 3-3)
+const API_HEADERS = { "Content-Type": "application/json", "X-Nokpixel-Bridge": "1" };
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
+    headers: API_HEADERS,
     ...options,
     body: options.body ? JSON.stringify(options.body) : undefined,
   });

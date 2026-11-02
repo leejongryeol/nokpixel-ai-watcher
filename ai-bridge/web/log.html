@@ -124,7 +124,8 @@ window.addEventListener("message", (event) => {
   if (index >= 0) { $("follow").checked = index === entries.length - 1; select(index); }
 });
 // 기록 창을 닫으면 게임 창을 다시 맨 앞으로 (실행 중이 아니면 서버가 무시한다)
-window.addEventListener("pagehide", () => navigator.sendBeacon("/api/focus"));
+// sendBeacon은 헤더를 붙일 수 없어서 keepalive fetch를 쓴다 (창이 닫혀도 요청은 끝까지 간다)
+window.addEventListener("pagehide", () => fetch("/api/focus", { method: "POST", headers: API_HEADERS, body: "{}", keepalive: true }).catch(() => {}));
 poll();
 </script>
 </body>

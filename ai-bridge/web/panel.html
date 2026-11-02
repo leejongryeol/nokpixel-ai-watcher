@@ -44,12 +44,10 @@
   .hintform button:disabled { opacity: 0.5; cursor: not-allowed; }
   .buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .buttons .btn { height: 34px; padding: 0 12px; font-size: 13px; }
-  .settings summary { cursor: pointer; font-size: 13px; color: var(--muted); }
-  .settings fieldset { border: none; padding: 0; margin: 8px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: 13px; }
-  .settings label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-  .settings select, .settings input[type=text], .settings input[type=number] { height: 32px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-deep); color: var(--text); font-size: 13px; }
-  .settings input[type=number] { width: 70px; }
-  .settings .buttons { margin-top: 8px; }
+  .settings { display: flex; flex-direction: column; gap: 6px; }
+  .settings .summary { font-size: 13.5px; font-weight: 700; }
+  .settings .pill { font-weight: 500; font-size: 12.5px; }
+  .pill.wait { color: var(--amber); border-color: var(--amber); }
 </style>
 </head>
 <body>
@@ -111,74 +109,43 @@
   </div>
   <p id="error" class="notice error hidden" style="margin: 0; padding: 6px 10px; font-size: 13px"></p>
 
-  <details id="setup" class="settings panel" open>
-    <summary>실험 설정 (실행 중에는 접혀요)</summary>
-    <form id="settings">
-      <fieldset id="fields">
-        <label>플레이어 <input id="player" type="text" size="8" autocomplete="off"></label>
-        <label>모델 <select id="model"></select></label>
-        <span role="radiogroup" aria-label="방식" style="display: inline-flex; gap: 10px">
-          <label><input type="radio" name="mode" value="dry" checked> 생각만</label>
-          <label><input type="radio" name="mode" value="live"> 실제 조작</label>
-        </span>
-        <label>최대 판단 <input id="steps" type="number" min="1" max="500" value="50"></label>
-        <label><input id="guide" type="checkbox"> 공략 제공</label>
-        <label>교훈 이어받기 <select id="lessons-from"><option value="">없음</option></select></label>
-        <label>시드 <input id="seed" type="text" size="10" placeholder="무작위" autocomplete="off"></label>
-      </fieldset>
-      <div class="buttons">
-        <button id="start" class="btn primary" type="submit">▶ 시작</button>
-        <span class="soon" style="display: inline-flex; gap: 8px; align-items: center; font-size: 13px">
-          <label><input type="checkbox" disabled> 한 번만 실행</label>
-          <label>판단 간격 <input type="number" disabled style="width: 50px"> 초</label>
-          <label>비용 상한 $<input type="number" disabled style="width: 60px"></label>
-          <span class="soon-tag">준비 중</span>
-        </span>
-      </div>
-    </form>
-  </details>
+  <section class="settings panel" aria-label="실험 설정">
+    <span class="panel-title" style="margin: 0">실험 설정 · 읽기 전용 (게임에서 정함)</span>
+    <div id="summary" class="summary">—</div>
+    <div class="buttons">
+      <span class="pill">▶ 게임의 AI 설정에서 시작해요</span>
+      <span id="waiting" class="pill wait hidden">⏳ 던전 도착을 기다리는 중</span>
+    </div>
+  </section>
 
 <script src="/static/common.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const RECENT = 5;  // 패널에 보여 줄 최근 판단 수 (전부는 기록 창에서)
-let info = null, runId = null, config = null, entries = [], pending = [], running = null, logWindow = null;
+let runId = null, config = null, entries = [], pending = [], running = null, logWindow = null;
+const HERO = { WARRIOR: "전사", MAGE: "마법사", ROGUE: "도적", HUNTRESS: "사냥꾼", DUELIST: "결투가", CLERIC: "성직자" };
 
-function save(key, value) { try { localStorage.setItem("console." + key, value); } catch (e) {} }
-function load(key) { try { return localStorage.getItem("console." + key) || ""; } catch (e) { return ""; } }
 function showError(text) { $("error").textContent = text; $("error").classList.toggle("hidden", !text); }
 
-async function init() {
-  info = await api("/api/setup-info");
-  $("model").replaceChildren(...info.models.map((m) => {
-    const ok = info.demo || info.providers[m.provider].has_key;
-    return el("option", { value: m.id, text: m.name + (ok ? "" : " (키 없음)") });
-  }));
-  $("model").value = load("model") || info.default_model;
-  $("lessons-from").append(...info.lesson_sources.map((r) =>
-    el("option", { value: r.run_id, text: `${r.run_id} · ${r.model_name} · ${r.steps}판단` })));
-  $("player").value = load("player") || "player";
-  if (info.demo) $("msg").textContent = "데모 모드: 게임·API 없이 가짜 판단, 잠금 없음";
-  poll();
+// 설정 요약 한 줄 (bridge.md 8장). 고치는 칸은 없고, 설정은 게임의 AI 설정 장면에서 정한다
+function summaryText(c) {
+  const parts = [c.model_name, c.guide ? "공략 제공" : "공략 없이", c.demo ? "데모" : c.dry_run ? "생각만" : "실제 조작", `${c.steps}판단`];
+  if (c.hero_class) parts.push(HERO[c.hero_class] || c.hero_class);
+  if (c.started_from === "game") parts.push(c.challenges ? `제약 ${(c.challenge_names || []).length}개` : "제약 없음");
+  parts.push("시드 " + (c.custom_seed || c.seed || "무작위"));
+  if (c.lessons_from) parts.push("교훈 " + c.lessons_from);
+  return parts.join(" · ");
 }
 
-// ----- 시작 · 중지 · 창 -----
-$("settings").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  showError("");
-  const seed = $("seed").value.trim();
-  save("player", $("player").value.trim()); save("model", $("model").value);
-  $("start").disabled = true;
-  try {
-    await api("/api/console/start", { method: "POST", body: {
-      player: $("player").value.trim(), model: $("model").value,
-      dry_run: document.querySelector('input[name="mode"]:checked').value === "dry",
-      steps: Number($("steps").value) || 50, guide: $("guide").checked,
-      lessons_from: $("lessons-from").value,
-      seed_mode: seed ? "fixed" : "random", seed,
-    }});
-  } catch (e) { showError(e.message); $("start").disabled = false; }
-});
+function renderSetup(s) {
+  const p = s.pending;
+  const c = p ? p.config : s.config;
+  $("summary").textContent = c ? summaryText(c) : "아직 준비된 판이 없어요.";
+  $("waiting").textContent = p ? "⏳ 던전 도착을 기다리는 중 · " + p.run_id : "";
+  $("waiting").classList.toggle("hidden", !p);
+}
+
+// ----- 중지 · 창 -----
 $("stop").addEventListener("click", () => api("/api/stop", { method: "POST" }).catch((e) => showError(e.message)));
 $("layout").addEventListener("click", async () => {
   try {
@@ -273,6 +240,7 @@ function renderNow(s) {
 }
 
 function render(s) {
+  renderSetup(s);
   if (s.status === "none") return;
   if (s.run_id !== runId) {  // 새 판: 이번 응답은 지난 판 기준(since)이라 버리고, 다음에 처음부터 받는다
     const first = runId === null;
@@ -281,11 +249,7 @@ function render(s) {
     if (!first) return;
   }
   config = s.config;
-  const nowRunning = s.status === "running";
-  if (nowRunning !== running) $("setup").open = !nowRunning;  // 시작하면 접고, 끝나면 다시 편다
-  running = nowRunning;
-  $("fields").disabled = running;
-  $("start").disabled = running;
+  running = s.status === "running";
   $("stop").disabled = !running;
   $("focus").disabled = !running || config.demo;
   $("hint").disabled = !running;
@@ -308,7 +272,7 @@ async function poll() {
   setTimeout(poll, 1000);
 }
 
-init().catch((e) => showError("서버에 연결하지 못했어요: " + e.message));
+poll();
 </script>
 </body>
 </html>

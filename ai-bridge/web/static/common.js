@@ -80,6 +80,16 @@ function checkLine(entry) {
 }
 
 // 판단 하나의 상세 (리포트 되감기, 세 창 판단 기록에서 함께 쓴다). 페이지에 d-meta … d-extra 요소가 있어야 한다.
+// 기록 창·리포트·관찰 패널에서 쓰는 접힌 목표 연결 줄. open이면 펼친 채로 만든다
+function checkFold(entry, open) {
+  if (!entry.check_goal && !entry.basis) return null;
+  const fold = el("details", { class: "checkfold" + (entry.basis === "추측" ? " guess" : "") },
+    el("summary", {}, "🎯 목표 연결",
+      entry.basis ? el("span", { class: "basis", text: " · 근거 " + (BASIS_ICON[entry.basis] || entry.basis) }) : null),
+    entry.check_goal ? el("div", { class: "checkbody", text: entry.check_goal }) : null);
+  fold.open = !!open;
+  return fold;
+}
 function fillEntryDetail(e, config, runId) {
   const $d = (id) => document.getElementById(id);
   $d("d-meta").replaceChildren(el("div", { class: "meta" },
@@ -89,7 +99,8 @@ function fillEntryDetail(e, config, runId) {
   $d("d-shot").src = `/shots/${encodeURIComponent(runId)}/${encodeURIComponent(e.image)}`;
   $d("d-thought").textContent = e.thought || "(생각 없음)";
   $d("d-checkpoint").textContent = e.checkpoint ? "🔍 큰 점검 · " + e.checkpoint : "";
-  $d("d-check").replaceChildren(...[checkLine(e)].filter(Boolean));
+  const wasOpen = !!$d("d-check").querySelector("details[open]");  // 판단을 넘겨도 펼침 상태를 유지한다
+  $d("d-check").replaceChildren(...[checkFold(e, wasOpen)].filter(Boolean));
   $d("d-action").textContent = actionLabel(e, config) + (e.speech ? `  ·  💬 "${e.speech}"` : "");
   $d("d-goal").replaceChildren(e.goal ? el("span", {}, el("b", { text: "🗺️ 중간 목표 " }), e.goal + (e.goal_changed ? " (이때 바뀜)" : "")) : "");
   $d("d-extra").replaceChildren(

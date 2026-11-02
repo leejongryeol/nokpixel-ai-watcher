@@ -75,10 +75,10 @@
   </dl>
 
   <section class="now panel">
-    <div class="panel-title" style="margin: 0">지금 생각 <span id="when" class="mono"></span><button id="open-step" class="btn hidden" type="button">기록 창에서 보기</button></div>
+    <div class="panel-title" style="margin: 0">지금 생각 <span id="when" class="mono"></span><span id="cp-tag" class="tag check hidden" style="margin-left: 8px">🔍 큰 점검</span><button id="open-step" class="btn hidden" type="button">기록 창에서 보기</button></div>
     <div id="thought" class="thought">—</div>
     <div class="row"><span><b>행동</b><span id="action">—</span></span></div>
-    <div class="row"><span><b>근거</b><span id="basis">—</span></span><span id="check" class="muted"></span></div>
+    <details id="checkfold" class="checkfold" style="font-size: 13px"><summary>🎯 목표 연결<span id="basis" class="basis"></span></summary><div id="check" class="checkbody">—</div></details>
   </section>
 
   <section class="soon soonbox" aria-label="준비 중인 항목">
@@ -260,8 +260,11 @@ function renderNow(s) {
   $("open-step").classList.remove("hidden");
   $("thought").textContent = latest.thought || "(생각 없음)";
   $("action").textContent = actionLabel(latest, c);
-  $("basis").textContent = latest.basis ? (BASIS_ICON[latest.basis] || latest.basis) : "—";
-  $("check").textContent = latest.check_goal ? "🎯 " + latest.check_goal : "";
+  // 큰 점검 판단은 ①②③ 답이 생각 글에 섞여 나온다 (AI 입력이 그렇게 시킴). 떼어 내지 않고 표시만 붙인다
+  $("cp-tag").classList.toggle("hidden", !latest.checkpoint);
+  $("basis").textContent = latest.basis ? " · 근거 " + (BASIS_ICON[latest.basis] || latest.basis) : "";
+  $("checkfold").classList.toggle("guess", latest.basis === "추측");
+  $("check").textContent = latest.check_goal || "—";  // 접힌 칸은 그대로 두고 글만 바꿔 펼침 상태를 유지한다
 }
 
 function render(s) {

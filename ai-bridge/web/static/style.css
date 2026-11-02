@@ -60,11 +60,17 @@ h2.section { margin: 0; font-size: 18px; font-weight: 700; }
 .tag.goal { background: var(--amber-bg); color: var(--amber); }
 .tag.memo { background: var(--teal-bg); color: var(--teal); }
 .tag.memodel { background: var(--teal-bg); color: var(--teal); }
-.tag.check { background: #2b2a3a; color: #c9c4f0; }
+.tag.check { display: inline-block; font-size: 12px; background: #2b2a3a; color: #c9c4f0; }  /* .check(되새김 줄) 모양이 섞이지 않게 */
 .tag.guess { background: var(--red-bg); color: var(--red); }
 .check { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12.5px; color: var(--text-soft); line-height: 1.5; }
 .check .basis { white-space: nowrap; color: var(--muted); }
 .check.guess .basis { color: var(--red); font-weight: 700; }
+/* 목표 연결 줄(check_goal): 생각보다 작게, 접어 둔다. 근거는 접힌 줄에도 보인다 */
+.checkfold { font-size: 12.5px; color: var(--text-soft); line-height: 1.5; }
+.checkfold summary { cursor: pointer; color: var(--muted); }
+.checkfold .basis { white-space: nowrap; }
+.checkfold.guess .basis { color: var(--red); font-weight: 700; }
+.checkfold .checkbody { padding: 4px 0 0 16px; }
 .lessons { margin: 0; white-space: pre-wrap; font-family: var(--font-mono); font-size: 13px; line-height: 1.6; color: #e2dac8; }
 .tag.hint { background: var(--purple-bg); color: var(--purple); border: 1px dashed #8d77b8; }
 

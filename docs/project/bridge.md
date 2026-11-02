@@ -149,26 +149,49 @@ flowchart TD
 **④ 판 설정 확정** `POST /api/bridge/run` (게임 → Python, [AI로 시작])
 ```json
 요청 {
-  "player": "player", "model": "gpt-6-luna", "guide": false, "dry_run": true,
+  "player": "player", "model": "gpt-6-luna", "guide": false, "dry_run": false,
   "steps": 50, "lessons_from": "",
-  "hero_class": "WARRIOR", "challenges": 0, "custom_seed": ""
+  "hero_class": "WARRIOR", "hero_title": "전사",
+  "challenges": 0, "challenge_names": [], "challenge_titles": [], "custom_seed": ""
 }
 응답 {"ok": true, "run_id": "run_20261102_140501_player"}
 ```
-Python은 `Agent`를 만들어 두기만 하고 **아직 시작하지 않는다**. `config.json`도 이때 쓴다 (A-5-3).
+Python은 `Agent`를 만들어 두기만 하고 **아직 시작하지 않는다** (대기 판). `config.json`도 이때 쓴다 (A-5-3). ⑤가 오면 시작한다 (A-5-4).
+`hero_title`·`challenge_titles`는 게임 화면에 보이는 언어 그대로의 이름이다 (A-5-4). AI 입력의 `[이번 판]`에 쓴다 (7장).
 
-**⑤ 던전 도착** `POST /api/bridge/arrived` (게임 → Python, 대기 중 AI 판이 있을 때 첫 `GameScene.create()` 한 번만)
+**⑤ 던전 도착** `POST /api/bridge/arrived` (게임 → Python, [AI로 시작]한 판의 첫 `GameScene`에서 한 번만)
 ```json
 요청 {"run_id": "run_20261102_140501_player", "depth": 1, "seed_code": "ABC-DEF-GHI"}
 응답 {"ok": true}
 ```
-Python은 실제 시드를 **`config.json`에만** 더하고 AI를 시작한다 (A-5-4). 시드는 AI 입력에 넣지 않는다 (7장).
+- 보내는 때: 장면이 생기고 1.2초가 지났고(화면이 밝아지는 효과가 1초), `Dungeon.hero.ready`가 참이고, `InterlevelScene.mode == NONE`일 때. 1층이 아니면 보내지 않는다.
+- Python은 실제 시드(`seed_code`)와 도착 층(`arrival_depth`)을 **`config.json`에만** 더하고 AI를 시작한다. 시드는 AI 입력에 넣지 않는다 (7장).
+- `run_id`가 대기 판과 다르면 `not_pending`(409), 다른 판이 진행 중이면 `running`(409).
 
 **⑥ 판 끝** `POST /api/bridge/ended` (게임 → Python)
 ```json
 요청 {"run_id": "run_20261102_140501_player", "reason": "died", "depth": 3}
 ```
-`reason`: `died`(✅ 후보 `Hero.die()`, `actors/hero/Hero.java:2171`), `won`(✅ 후보 `Dungeon.win()`, `Dungeon.java:880`), `quit`(✅ 후보 `WndGame`의 타이틀로 가기, `windows/WndGame.java:109`). ⬜ 어느 지점에 둘지는 A-5-4 뒤에 정한다.
+보내는 곳은 모두 `GameScene` 안 두 곳이다 (A-5-4에서 정함). `Hero`·`Dungeon`·`WndGame`은 고치지 않았다.
+
+| `reason` | 지점 | 근거 |
+|---|---|---|
+| `died` | `GameScene.gameOver()` | `Hero.die()` → `reallyDie()` → 렌더 스레드에서 `gameOver()`. 앙크가 있으면 부르지 않는다 (부활 창) |
+| `won` | `GameScene.destroy()`에서 `Statistics.gameWon`이 참 | `Dungeon.win()`이 `gameWon`을 켠 뒤 장면을 바꾼다 |
+| `quit` | `GameScene.destroy()`에서 `InterlevelScene.mode == NONE` | 층을 옮길 때는 늘 `NONE`이 아닌 값으로 정한 뒤 장면을 바꾼다. 타이틀로 나가기·게임 창 닫기는 `NONE` |
+
+- 게임 창을 닫을 때도 `quit`이 간다. 하지만 곧바로 프로그램이 끝나서 닿을지 보장이 없다. Python은 1초 뒤 게임 창이 없으면 `game_closed`로 바꿔 적는다. 닿지 않으면 ⑦이 끊겨서 멈춘다.
+- `reason`이 위 셋이 아니면 `bad_reason`(400), `run_id`가 진행 중 판과 다르면 `not_running`(409).
+- 한계: 아뮬렛 장면(26층)으로 갈 때도 `quit`으로 보일 수 있다. 목표가 5층이라 다루지 않았다.
+
+**⑦ 살아 있음 신호** `POST /api/bridge/heartbeat` (게임 → Python, AI 판 동안 1초마다, A-5-4)
+```json
+요청 {"run_id": "run_20261102_140501_player", "alive": true, "depth": 2}
+응답 {"ok": true}
+```
+- ⑤가 성공한 뒤부터 `GameScene`에 있는 동안 보낸다. 주인공이 죽은 것을 처음 보면 1초를 기다리지 않고 바로 `alive: false`를 보낸다.
+- 응답이 `ok: false`(판이 이미 끝남, 관찰기를 다시 켬)면 게임은 신호를 멈춘다. 3번 연달아 실패하면(관찰기가 꺼짐) 신호를 멈추고 기록창에 한 줄 띄운다. 게임은 그대로 진행한다.
+- Python은 키·클릭 하나를 보내기 **직전마다** 확인한다 (`Agent._guard()`): 중지됐으면 멈춤 → 마지막 신호가 `alive: false`면 `died` → 신호가 3초 넘게 없으면 키를 보내지 않고 기다림(층 이동 로딩일 수 있음) → 게임 창이 없어졌으면 `game_closed` → 30초가 지나면 `lost_game`. 게임 창이 맨 앞일 때만 키를 보내는 기존 확인은 그대로다.
 
 ### 3-2. 방향과 시점
 
@@ -178,8 +201,9 @@ Python은 실제 시드를 **`config.json`에만** 더하고 AI를 시작한다 
 | [키 입력] 확인 | 게임 → Python | ② 키 보내기 | 키는 버리고 안내 |
 | [연결 시험] | 게임 → Python | ③ 연결 시험 (최대 30초) | 결과에 맞는 안내 |
 | [AI로 시작] | 게임 → Python | ④ 판 설정 확정 | 시작하지 않고 장면에 머묾 |
-| 던전 도착 (그 판의 첫 번째만) | 게임 → Python | ⑤ 던전 도착 | 게임은 그대로 진행, 화면 위에 "AI가 시작되지 않았어요" 한 줄 (⬜ 표시 방법) |
-| 판 끝 | 게임 → Python | ⑥ 판 끝 | 무시 (Python 쪽은 기존 중지·최대 판단으로도 끝남) |
+| 던전 도착 (그 판의 첫 번째만) | 게임 → Python | ⑤ 던전 도착 | 게임은 그대로 진행, 게임 기록창에 "AI가 시작되지 않았어요. 직접 플레이할 수 있어요." 한 줄 |
+| 판 끝 (사망·승리·타이틀로 나가기·창 닫기) | 게임 → Python | ⑥ 판 끝 | 무시. 닿지 않아도 ⑦이 끊겨서 Python은 키를 보내지 않는다 |
+| AI 판 동안 1초마다 | 게임 → Python | ⑦ 살아 있음 신호 | 3번 연달아 실패하면 신호를 멈추고 기록창에 "AI 관찰기와 연결이 끊겼어요. 직접 이어서 할 수 있어요." 한 줄 |
 
 Python이 게임에 먼저 말을 거는 일은 없다. 게임이 물으면 Python이 답한다.
 
@@ -261,6 +285,13 @@ Python이 게임에 먼저 말을 거는 일은 없다. 게임이 물으면 Pyth
 | 공략 여부·교훈 | 지금과 같음 | 공략 제공·교훈 이어받기는 실험 조건으로 이미 따로 넣고 있다 |
 
 💭 **실험 비교 주의**: README의 실험 조건은 "직업 전사, 도전 모드 끔"으로 고정이다. 캐릭터·제약 줄을 AI 입력에 더하면 프롬프트가 바뀌므로, 이 줄이 들어간 판과 이전 판은 조건이 다르다. 전사·제약 없음으로 고정할 거라면 이 줄을 넣지 않는 선택도 있다 (10장 남은 질문).
+
+→ A-5-4 오더에서 합의해 **게임에서 시작한 판에만** 넣었다. 규칙 바로 뒤, 공략·교훈 앞에 아래 블록이 붙는다. 제약이 없으면 `제약:` 줄이 없다. `mvp.py` 판은 그대로다. 두 판은 `config.json`의 `started_from: "game"`으로 구분한다.
+```
+[이번 판]
+직업: 전사
+제약: 다이어트 중, 어둠 속으로
+```
 
 ---
 
@@ -345,7 +376,7 @@ Python이 게임에 먼저 말을 거는 일은 없다. 게임이 물으면 Pyth
 - ③: 고른 모델로 "ok라고만 답해." 한 번(출력 16토큰, 30초, 다시 시도 없음). 오류는 이름으로만 나눈다: `AuthenticationError`→`key_invalid`, `APITimeoutError`→`timeout`, 문구에 `insufficient_quota`·`credit balance`→`no_credit`, `NotFoundError`·`PermissionDeniedError`→`model_unavailable`, 나머지→`other`. 오류 원문은 어디에도 내보내지 않는다. 데모 모드는 API를 부르지 않고 `ok`.
 - 시험 결과는 회사별로 메모리에만 둔다. ②로 키를 바꾸면 지운다. `web.py`를 다시 켜면 다시 시험해야 한다.
 - ④: 진행 중 판이 있으면 `running`(409), 시험 성공 전이면 `not_tested`(409)로 거절. 대기 판은 하나이고, 새 ④가 오면 바꾼다. 바뀐 대기 판의 폴더에 `config.json`만 있으면 지운다. 대기 판은 `lock_input=True`로 만든다(패널에서 시작하던 때와 같은 입력 잠금).
-- `config.json`에 더한 항목: `hero_class`(예: `WARRIOR`), `challenges`(비트 번호), `challenge_names`(`Challenges.NAME_IDS`의 영어 ID), `custom_seed`, `started_from: "game"`. 기존 `seed` 칸에는 `custom_seed`(비면 "무작위")를 넣는다. 캐릭터·제약은 AI 입력에 넣지 않는다 (합의).
+- `config.json`에 더한 항목: `hero_class`(예: `WARRIOR`), `challenges`(비트 번호), `challenge_names`(`Challenges.NAME_IDS`의 영어 ID), `custom_seed`, `started_from: "game"`. 기존 `seed` 칸에는 `custom_seed`(비면 "무작위")를 넣는다. 캐릭터·제약은 AI 입력에 넣지 않는다 (합의). → A-5-4에서 바꿨다 (7장).
 
 **확인한 것** (curl, 시험용 `--env` 파일과 가짜 키, 11/2)
 - ✅ 헤더 없는 요청·JSON이 아닌 POST·헤더 없는 `/api/stop` → 403
@@ -374,6 +405,42 @@ Python이 게임에 먼저 말을 거는 일은 없다. 게임이 물으면 Pyth
 - 실험 비교: `config.json`의 `dry_run` 칸은 그대로 기록되므로 지난 판과 구분할 수 있다. 프롬프트·`log.jsonl`은 그대로다.
 - 확인: ✅ `desktop:compileJava` 통과, ✅ Java `ProcessBuilder`로 `cmd /c start "제목" /D 폴더 …`를 실행해 새 창에서 명령이 도는 것(시험 파일 생성)을 확인. 사용자 확인: 게임에서 버튼을 눌러 `web.py`가 켜지고 이어짐, 별 문제 없었다
 
+### A-5-4 결과 (11/2)
+
+**고친 파일**
+| 파일 | 내용 |
+|---|---|
+| `core/.../AIBridge.java` | `pendingRunId`(④ 성공 직후에만 켬)·`activeRunId`(⑤ 성공 뒤), `onGameUpdate()`(⑤·⑦), `onGameOver()`·`onLeaveGame()`(⑥), 실패를 게임 기록창(`GLog.w`)에 한 줄 |
+| `scenes/GameScene.java` | `update()`, `gameOver()`, `destroy()`에 `AIBridge`를 부르는 한 줄씩 (세 줄) |
+| `scenes/AISetupScene.java` | ④ 성공 → `pendingRunId`, [AI 없이 시작] → 지움. ④에 `hero_title`·`challenge_titles`. 튜토리얼 판이면 [AI로 시작] 막기 |
+| `messages/scenes/scenes*.properties` | 기록창 문구 2개(`gamescene.ai_not_started`, `ai_disconnected`), 튜토리얼 안내(`aisetupscene.tutorial_first`) (영어·한국어) |
+| `ai-bridge/web.py` | `/api/bridge/arrived`(⑤), `/heartbeat`(⑦), `/ended`(⑥). ④에서 화면 이름 받기(`clean_name`) |
+| `ai-bridge/agent.py` | `arrived()`, `heartbeat()`, `end_game()`, `_guard()`(키·클릭마다), `config.json`의 `ended_reason`·`ended_depth`·`ended_at`, `system_prompt()`의 `[이번 판]` 블록. `log.jsonl` 형식은 그대로 |
+| `ai-bridge/web/panel.html`, `report.html` | 시드는 `seed_code`가 있으면 그것을, 끝난 이유·층 표시 (이 항목이 없는 옛 기록은 지금처럼) |
+
+**동작**
+- [AI로 시작] → ④ → 던전 1층 → ⑤ → Python이 대기 판을 시작한다. 사람이 아무것도 누르지 않아도 된다. 시작할 때 게임 창을 맨 앞으로 가져온다.
+- `pendingRunId`는 첫 `GameScene`에서 한 번 쓰고 지운다. 그래서 계단으로 층을 옮겨도 ⑤를 다시 보내지 않는다. 이어하기·일일 도전은 AI 설정 장면을 거치지 않아 켜질 일이 없다.
+- 판이 끝나는 길: ⑥(`died`·`won`·`quit`), ⑦의 `alive: false`(`died`), 신호 끊김(`game_closed`·`lost_game`), 패널 ■ 중지(`stopped`), 최대 판단(`max_steps`), 오류(`error`). 무엇으로 끝나든 그 자리에서 입력 잠금을 먼저 풀고, 처음 받은 이유 하나만 `ended_reason`에 남긴다.
+- 키 3개를 연달아 보낼 때도 키마다, 생각을 마친 뒤 실행하기 전에도 확인한다. `quit`·`game_closed`·`lost_game`이면 마지막 화면을 다시 찍지 않는다.
+- 첫 판 튜토리얼(`SPDSettings.intro()`)은 툴바를 숨기고 1층 생성·배고픔을 바꾼다 (✅ 코드 확인). 그래서 튜토리얼이 남아 있으면 [AI로 시작]을 회색으로 두고 "첫 판은 튜토리얼이라…[AI 없이 시작]으로 튜토리얼을 한 번 마친 뒤 AI로 시작해 주세요"라고 안내한다.
+- 대기 판에 들어가지 않은 경우([AI 없이 시작], 1층이 아닌 곳): Python의 대기 판은 그대로 남고, 다음 ④가 오면 바뀌며 `config.json`만 있는 폴더는 지운다.
+
+**확인한 것** (11/2)
+- ✅ `gradlew.bat desktop:compileJava` 통과, `py_compile` 통과
+- ✅ curl (데모 모드, 시험용 `--env`): ⑤의 `run_id`가 다르면 거절, 같으면 대기 판이 진행 중으로 바뀌고 `seed_code`가 `config.json`에 들어감
+- ✅ curl: 신호 없음 → 키를 보내지 않고 기다리다 30초 뒤 `lost_game` / `alive: false` → `died`, 그 뒤 신호는 거절 / ⑥ `quit` → `quit`(다른 `run_id` 409, 틀린 `reason` 400) / 패널 중지 → `stopped` / 최대 판단 → `max_steps` / ⑥ `died` → `died`와 층
+- ✅ `mvp.py` 판은 확인 장치가 꺼져 있고 지금처럼 끝남 (`ended_reason: max_steps`). 10/25 기록이 리포트에서 그대로 열림
+- ✅ AI 입력: 데모로 시스템 프롬프트를 출력해 비교. 게임 판은 규칙 뒤에 `[이번 판]` 블록, 제약이 없으면 `직업:` 줄만, `mvp.py` 판은 원래 규칙과 글자까지 같음, 시드 글자는 없음
+- ✅ curl: ④의 화면 이름이 `config.json`에 들어감. 줄바꿈은 공백으로, 빈 이름은 빠짐
+- ⬜ 게임에서 직접 해 보는 확인 (손 시험 목록: `docs/test-results/test-results-2026-11-02.txt`의 A-5-4 부분)
+- ⬜ 실제 판 (GPT-6 Luna, 최대 판단 5)
+- ⬜ 게임이 보내는 한국어 직업·제약 이름이 그대로 들어가는지 (curl로는 확인, 게임에서는 미확인)
+
+**설계와 다른 점**
+- ⑤는 `GameScene.create()`가 아니라 `update()`에서, 조작할 수 있게 된 뒤에 보낸다 (화면 효과·주인공 준비를 기다림).
+- ⑦ 살아 있음 신호를 더했다. 처음 약속에는 없었다 (⑥이 닿지 않을 때를 위해).
+
 ---
 
 ## 10. 남은 질문 · 미확인
@@ -381,13 +448,17 @@ Python이 게임에 먼저 말을 거는 일은 없다. 게임이 물으면 Pyth
 **만들 때 정할 것**
 - ~~`TextInput`(SPD-classes)에 가리기 메서드를 더하는 것~~ → A-5-2 오더에서 합의, `setPasswordMode()`로 만들었다.
 - ~~캐릭터·제약 줄을 AI 입력에 넣을지~~ → A-5-3 오더에서 합의: `config.json`에만 기록하고 AI 입력은 바꾸지 않는다.
-- 판 끝(⑥)을 알릴 지점: `Hero.die()` / `Dungeon.win()` / `WndGame`의 타이틀로 가기 중 어디에 둘지. (A-5-3과 관계없음)
+- ~~판 끝(⑥)을 알릴 지점~~ → A-5-4에서 `GameScene.gameOver()`·`destroy()` 두 곳으로 정했다 (3-1).
 - ~~기존 `/api/start` 등에도 다른 웹사이트 요청 막기(3-3)를 적용할지~~ → 적용했다 (9장 A-5-3 결과).
-- 대기 판이 있는데 사람이 [AI 없이 시작]으로 들어가거나 `web.py`를 끄면 대기 판을 어떻게 할지 (A-5-4에서 정함. 지금은 대기 판이 메모리에만 있고, `web.py`를 끄면 `config.json`만 있는 폴더가 남는다. 리포트 목록에는 나오지 않는다).
+- 대기 판이 있는데 사람이 [AI 없이 시작]으로 들어가거나 `web.py`를 끄면 대기 판을 어떻게 할지 → A-5-4에서는 그대로 둔다. 게임은 AI를 시작하지 않고, Python의 대기 판은 다음 ④가 오면 바뀐다. `web.py`를 끄면 `config.json`만 있는 폴더가 남는다 (리포트 목록에는 나오지 않는다).
+- ~~캐릭터·제약 줄을 AI 입력에 넣을지 (A-5-3 합의 다시)~~ → A-5-4에서 게임 판에만 넣기로 했다 (7장).
 
 **⬜ 미확인**
 - ~~가림 글자가 게임 글꼴로 그려지는지, 데스크톱에서 Ctrl+V로 키를 붙여 넣을 수 있는지~~ → ✅ A-5-2에서 확인 (9장).
-- 첫 판 튜토리얼(`SPDSettings.intro()`)이 AI 첫 판에 주는 영향.
+- ~~첫 판 튜토리얼(`SPDSettings.intro()`)이 AI 첫 판에 주는 영향~~ → 화면과 1층·배고픔이 달라서 튜토리얼이 남아 있으면 [AI로 시작]을 막았다 (9장 A-5-4).
+- 게임 창을 닫을 때 ⑥이 Python에 닿는지 (닿지 않아도 ⑦이 끊겨 멈춘다).
+- 앙크로 부활할 때: `gameOver()`가 불리지 않으므로 AI 판은 이어진다. 다만 죽는 순간 ⑦에 `alive: false`가 먼저 갈 수 있다. 게임에서 확인하지 않았다.
+- 아뮬렛 장면(26층)으로 갈 때 `quit`으로 보이는 것 (목표 밖).
 - `Gdx.net` 요청이 실패할 때 걸리는 시간 (Python이 꺼져 있을 때 바로 실패하는지). → 확인 목록에 넣음.
 - ~~Flask 접속 기록에 요청 본문(키)이 정말 남지 않는지~~ → ✅ 남지 않는다 (9장 A-5-3 결과).
 - ~~세로 360×640(게임 안 180×320)에 이 항목이 모두 들어가는지~~ → ✅ 들어간다 (9장).

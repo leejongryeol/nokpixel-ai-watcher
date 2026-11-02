@@ -22,7 +22,7 @@ AI가 사람처럼 **게임 화면을 보고 키보드·마우스로 조작**한
 | 구성 요소 | 파일 | 역할 |
 |---|---|---|
 | 게임 | `desktop/.../DesktopLauncher.java` | 녹픽던 원본. 세로 창 3단계 크기와 모바일 화면·배율만 고정 (아래 "게임 창 크기와 AI 사진") |
-| AI 설정 장면 | `core/.../scenes/AISetupScene.java` (+ `HeroSelectScene` [시작], `SPDSettings` `ai_*`, `TextInput.setPasswordMode`, `scenes*.properties`) | 캐릭터 선택 → AI 설정 → 던전. Python에 상태를 묻고 키 보내기·연결 시험·판 준비(`config.json`)까지 한다. 관찰기가 꺼져 있으면 [AI 관찰기 켜기]로 `web.py --panels`를 새 명령 창에서 켠다. 게임에서 시작하는 판은 언제나 실제 조작. AI 판 자동 시작은 A-5-4 예정. 자세한 것: [bridge.md](bridge.md) 9장 |
+| AI 설정 장면 | `core/.../scenes/AISetupScene.java` (+ `HeroSelectScene` [시작], `SPDSettings` `ai_*`, `TextInput.setPasswordMode`, `scenes*.properties`) | 캐릭터 선택 → AI 설정 → 던전. Python에 상태를 묻고 키 보내기·연결 시험·판 준비(`config.json`)까지 한다. 관찰기가 꺼져 있으면 [AI 관찰기 켜기]로 `web.py --panels`를 새 명령 창에서 켠다. 게임에서 시작하는 판은 언제나 실제 조작. 던전 1층 도착(⑤)에서 AI 판이 자동으로 시작하고, `GameScene`의 `gameOver()`·`destroy()`에서 판 끝(⑥)을, AI 판 동안 1초마다 살아 있음 신호(⑦)를 보낸다 (A-5-4). 자세한 것: [bridge.md](bridge.md) 3장·9장 |
 | 게임 ↔ Python 통로 | `core/.../AIBridge.java`, `web.py`의 `/api/bridge/*` | 게임이 `Gdx.net`으로 `127.0.0.1:8765`에 묻고, 응답은 렌더 스레드로 넘긴다. 실패해도 게임은 멈추지 않는다 |
 | AI 플레이어 | `ai-bridge/agent.py` | 화면 캡처 → AI 모델 호출(Claude / OpenAI) → 키·클릭 실행 → 기록 |
 | 관찰 웹 화면 | `ai-bridge/web.py`, `ai-bridge/web/` | 실시간 관찰, 리포트·되감기, 실험 설정 화면은 데모 전용 (내 컴퓨터에서만 접속) |
@@ -63,7 +63,7 @@ AI가 사람처럼 **게임 화면을 보고 키보드·마우스로 조작**한
   - 마우스는 게임 창 안쪽의 클릭·휠만, 키보드는 게임 창이 맨 앞일 때만 막는다.
   - 풀리는 때: `Agent.run()`이 끝날 때(`finally`), 부모(`web.py`) 프로세스가 죽을 때, `web.py` 종료(`atexit`), 비상 해제 `F12`(조합키는 Ctrl·Shift가 먼저 막혀서 인식되지 않아 키 하나로 했다). 프로세스가 어떻게 끝나든 Windows가 훅을 자동으로 뺀다.
   - 별도 프로세스로 둔 이유: 훅 처리가 늦으면 Windows가 훅을 말없이 빼기 때문이다.
-- **판 시작은 게임의 AI 설정 장면**에서 한다 (`/api/bridge/run`이 판을 준비, 시작은 A-5-4). 패널의 시작(`/api/console/start`)은 없앴다. 데모 설정 화면의 `/api/start`는 `--demo`에서만 받고 `.env`에 쓰지 않는다. `.env`에 쓰는 곳은 `/api/bridge/key` 하나뿐이고 회사 키 한 줄만 쓴다.
+- **판 시작은 게임의 AI 설정 장면**에서 한다 (`/api/bridge/run`이 판을 준비하고 `/api/bridge/arrived`에서 시작). 게임에서 시작한 판은 키·클릭마다 `Agent._guard()`가 살아 있음 신호를 확인해서, 판이 끝났거나 신호가 끊기면 키를 보내지 않는다. 패널의 시작(`/api/console/start`)은 없앴다. 데모 설정 화면의 `/api/start`는 `--demo`에서만 받고 `.env`에 쓰지 않는다. `.env`에 쓰는 곳은 `/api/bridge/key` 하나뿐이고 회사 키 한 줄만 쓴다.
 - 상태를 바꾸는 주소(`/api/bridge/*`, 중지, 힌트, 입력 중 표시, 게임 창 앞으로, 창 배치, 요약 만들기)는 `X-Nokpixel-Bridge: 1` 헤더가 있는 JSON 요청만 받는다 (다른 웹사이트 요청 막기). 웹 화면의 `api()`가 헤더를 붙이고, 기록 창이 닫힐 때 보내는 요청도 `sendBeacon` 대신 헤더를 붙인 `fetch(keepalive)`로 바꿨다.
 - Flask `app.run()`은 실행 폴더의 `.env`를 스스로 읽으므로 `load_dotenv=False`로 끄고, `web.py`가 고른 파일(기본 `ai-bridge/.env`, 시험할 때 `--env`)만 읽는다.
 - 관찰 패널·기록 창은 `/api/state?since=n`으로 새 판단만 받는다. 신호등·잠금 상태(`phase`, `game_front`, `focus_waiting`, `locked`)는 화면에만 쓰고 `log.jsonl`에는 넣지 않는다.
@@ -106,7 +106,7 @@ AI가 사람처럼 **게임 화면을 보고 키보드·마우스로 조작**한
 ## 다음 단계 구조 (예정: 게임 코드 연결)
 
 화면만으로는 체력·층 같은 정확한 정보와 판단 시점을 알기 어렵다. 게임 코드에 연결 지점을 추가할 예정이다.
-게임 안 AI 설정 장면과 게임 ↔ Python 약속(통로, 주고받는 값, 키 처리)은 [bridge.md](bridge.md)에 따로 정리했다. 장면 화면과 값 기억(A-5-2), 값 전달과 `config.json` 자동 기록(A-5-3)은 만들었고, 던전 도착 뒤 AI 자동 시작(A-5-4)은 예정이다.
+게임 안 AI 설정 장면과 게임 ↔ Python 약속(통로, 주고받는 값, 키 처리)은 [bridge.md](bridge.md)에 따로 정리했다. 장면 화면과 값 기억(A-5-2), 값 전달과 `config.json` 자동 기록(A-5-3), 던전 도착 뒤 AI 자동 시작과 판 끝에 멈춤(A-5-4)은 만들었다. A-5-4의 게임 안 손 시험은 예정이다.
 
 ```
 녹픽던 게임 ── Hero.ready() 감지 ──▶ 게임 상태(JSON) ──▶ ai-bridge ──▶ Claude

@@ -62,6 +62,15 @@ function actionLabel(entry, config) {
   return entry.action_text + (config && config.dry_run ? " " + NOT_EXECUTED : "");
 }
 
+// 개입 횟수: 개입 규칙은 "힌트만, 조종 금지"라서 사람이 조작했을 수 있는 일시정지·F12 비상 해제도 센다.
+// 기록(판단의 hints, config.json의 pauses·unlocks)에서 다시 세므로 지난 판도 같은 규칙으로 계산된다
+function interventions(entries, config, pausedNow) {
+  const hints = (entries || []).reduce((n, e) => n + (e.hints ? e.hints.length : 0), 0);
+  const pauses = ((config && config.pauses) || []).length + ((config && config.unlocks) || []).length + (pausedNow ? 1 : 0);
+  return { hints, pauses, total: hints + pauses };
+}
+function interventionText(n) { return `힌트 ${n.hints}회 · 일시정지 ${n.pauses}회`; }
+
 // 생각 카드·리포트에 쓰는 되새김 한 줄
 function checkLine(entry) {
   if (!entry.check_goal && !entry.basis) return null;

@@ -26,12 +26,15 @@ class InputLock:
     def __init__(self):
         self.proc = None
         self.note = ""  # 잠금을 못 걸었거나 비상 해제됐을 때 이유
+        self.hotkey_unlocked = False  # F12로 풀렸으면 True (프로세스는 살아 있어도 아무것도 막지 않음)
+        self.on_hotkey = None  # F12로 풀릴 때 부를 함수 (개입 기록용)
 
     def start(self, hwnd, wait=5.0):
         """잠금 프로세스를 띄우고 훅이 걸릴 때까지 기다린다. 걸렸으면 True."""
         import os
         self.stop()
         self.note = ""
+        self.hotkey_unlocked = False
         try:
             self.proc = subprocess.Popen(
                 [sys.executable, os.path.abspath(__file__), "--hwnd", str(int(hwnd)), "--parent", str(os.getpid())],
@@ -49,6 +52,9 @@ class InputLock:
                     ready.set()
                 elif line == "UNLOCKED_BY_HOTKEY":
                     self.note = "비상 해제 키로 잠금이 풀렸어요."
+                    self.hotkey_unlocked = True
+                    if self.on_hotkey:
+                        self.on_hotkey()
         threading.Thread(target=read_lines, daemon=True).start()
         if not ready.wait(wait):
             self.stop()
@@ -59,6 +65,11 @@ class InputLock:
     @property
     def active(self):
         return self.proc is not None and self.proc.poll() is None
+
+    @property
+    def locking(self):
+        """정말 막고 있는지 (F12로 풀렸으면 프로세스가 살아 있어도 False)."""
+        return self.active and not self.hotkey_unlocked
 
     def stop(self):
         proc, self.proc = self.proc, None

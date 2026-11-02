@@ -84,7 +84,7 @@
       <input id="hint" type="text" placeholder="힌트를 입력하세요" autocomplete="off" disabled>
       <button id="send" type="submit" disabled>보내기</button>
     </div>
-    <span class="help" style="font-size: 12px">이번 판 개입 <b id="hint-count">0</b>회 · 입력하는 동안 AI는 다음 판단을 기다려요 (최대 60초)
+    <span class="help" style="font-size: 12px">개입: <b id="hint-count">힌트 0회 · 일시정지 0회</b> · 입력하는 동안 AI는 다음 판단을 기다려요 (최대 60초)
       <span class="soon" style="margin-left: 8px">개입 뒤 AI 반응 강조 <span class="soon-tag">준비 중</span></span></span>
   </form>
 
@@ -261,7 +261,10 @@ function render(s) {
   const pendingBefore = pending.join("\n");
   entries = entries.concat(s.entries.filter((e) => !entries.length || e.step > entries[entries.length - 1].step));
   pending = s.pending_hints;
-  $("hint-count").textContent = entries.reduce((n, e) => n + (e.hints ? e.hints.length : 0), 0) + pending.length;
+  // 아직 전달되지 않은 힌트와 지금 하고 있는 일시정지도 센다
+  const n = interventions(entries, config, paused);
+  n.hints += pending.length;
+  $("hint-count").textContent = interventionText(n);
   if (pending.join("\n") !== pendingBefore) renderPending();
   renderNow(s);
 }

@@ -578,6 +578,7 @@ class Agent:
         if lock_input and not demo:
             from input_lock import InputLock
             self.input_lock = InputLock()
+            self.input_lock.on_hotkey = self._record_unlock
 
     # ----- 외부에서 쓰는 함수 -----
     def start(self):
@@ -614,6 +615,13 @@ class Agent:
         if depth is not None:
             self.depth = depth
         self.stop()
+
+    def _record_unlock(self):
+        """F12 비상 해제: 그때부터 사람이 조작할 수 있으므로 일시정지와 같은 개입으로 config.json의 unlocks에 남긴다."""
+        self.config.setdefault("unlocks", []).append({
+            "at": datetime.now().isoformat(timespec="seconds"), "step": self.step,
+            "during": "limit" if self.phase == "limit" else "paused" if self._paused.is_set() else "running"})
+        self._save_config()
 
     def heartbeat(self, alive, depth):
         """⑦ 게임이 1초마다 보내는 살아 있음 신호."""
@@ -676,7 +684,7 @@ class Agent:
             "game_front": game.is_front() if hasattr(game, "is_front") else None,
             "focus_waiting": bool(getattr(game, "waiting_focus", False)),
             "lock_used": self.input_lock is not None,
-            "locked": bool(self.input_lock and self.input_lock.active),
+            "locked": bool(self.input_lock and self.input_lock.locking),
             "lock_note": self.input_lock.note if self.input_lock else "",
         }
 

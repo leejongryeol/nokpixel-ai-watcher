@@ -12,6 +12,7 @@
   .result { padding: 16px 20px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
   .result .k { font-size: 12px; font-weight: 700; letter-spacing: 1px; color: var(--muted); }
   .result .v { font-size: 22px; font-weight: 700; }
+  .flag { align-self: flex-start; padding: 3px 10px; border-radius: 999px; background: var(--purple-bg); border: 1px dashed #8d77b8; color: var(--purple); font-size: 12.5px; font-weight: 700; }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
   .tile { padding: 14px 16px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); }
   .tile .v { font-size: 26px; font-weight: 700; font-family: var(--font-mono); }
@@ -52,6 +53,7 @@
 <main id="main" class="main">
   <div class="row1">
     <div class="result">
+      <span id="flag" class="flag hidden">⭐ 개입 있는 판</span>
       <span class="k">결과</span>
       <span class="v" id="result">-</span>
       <span class="muted" id="result-sub" style="font-size: 13px"></span>
@@ -61,7 +63,7 @@
       <div class="tile"><div class="panel-title">토큰</div><div class="v" id="t-tokens">0</div></div>
       <div class="tile"><div class="panel-title">비용</div><div class="v" id="t-cost" style="color: var(--accent)">$0</div></div>
       <div class="tile"><div class="panel-title">중간 목표 변경</div><div class="v" id="t-goals">0<small>회</small></div></div>
-      <div class="tile"><div class="panel-title">개발자 개입</div><div class="v" id="t-hints">0<small>회</small></div></div>
+      <div class="tile"><div class="panel-title">개발자 개입</div><div class="v" id="t-hints">0<small>회</small></div><div class="muted" id="t-hints-sub" style="font-size: 12px"></div></div>
       <div class="tile"><div class="panel-title">근거가 추측</div><div class="v" id="t-guess" style="color: var(--red)">0<small>회</small></div></div>
       <div class="tile"><div class="panel-title">메모 스스로 지움</div><div class="v" id="t-memodel">0<small>회</small></div></div>
     </div>
@@ -177,7 +179,10 @@ function show(data) {
   $("t-tokens").textContent = number(tokens);
   $("t-cost").textContent = money(cost);
   $("t-goals").replaceChildren(String(goals.length), el("small", { text: "회" }));
-  $("t-hints").replaceChildren(String(hinted.length), el("small", { text: "회" }));
+  const n = interventions(es, c);
+  $("t-hints").replaceChildren(String(n.total), el("small", { text: "회" }));
+  $("t-hints-sub").textContent = interventionText(n);
+  $("flag").classList.toggle("hidden", !n.total);
   $("t-guess").replaceChildren(String(es.filter((e) => e.basis === "추측").length), el("small", { text: "회" }));
   $("t-memodel").replaceChildren(String(es.filter((e) => e.memo_removed).length), el("small", { text: "회" }));
 
@@ -201,7 +206,13 @@ function show(data) {
     : "아직 없어요. 판이 끝나면 AI가 이번 판을 돌아보고 직접 써요.");
   $("lessons-from").textContent = c.lessons_from ? "보낸 판 · " + c.lessons_from : "";
   $("inherited").textContent = data.inherited_lessons || "이어받지 않고 시작한 판이에요.";
-  listOrEmpty($("hints"), hinted.map((e) => el("div", {}, el("span", { class: "s", text: `판단 ${e.step}  ` }), e.hints.join(" / "))), "개입하지 않았어요.");
+  // 힌트(판단 번호)와 일시정지·F12(시각)를 한 목록에. 일시정지 동안에는 사람이 조작했을 수 있다
+  const hhmm = (t) => (t || "").slice(11, 16);
+  listOrEmpty($("hints"), [
+    ...hinted.map((e) => el("div", {}, el("span", { class: "s", text: `판단 ${e.step}  ` }), "💡 " + e.hints.join(" / "))),
+    ...(c.pauses || []).map((p) => el("div", {}, el("span", { class: "s", text: `판단 ${p.step}  ` }), `⏸ 일시정지 ${hhmm(p.from)}~${hhmm(p.to)}`)),
+    ...(c.unlocks || []).map((u) => el("div", {}, el("span", { class: "s", text: `판단 ${u.step}  ` }), `🔓 F12 비상 해제 ${hhmm(u.at)}`)),
+  ], "개입하지 않았어요.");
   select(es.length - 1);
 }
 
@@ -214,7 +225,7 @@ async function init() {
   const runs = await api("/api/runs");
   if (!runs.length) { $("no-run").classList.remove("hidden"); $("main").classList.add("hidden"); return; }
   $("run").replaceChildren(...runs.map((r) => el("option", { value: r.run_id,
-    text: `${r.run_id.slice(4, 17).replace("_", " ")} · ${r.player} · ${r.model_name} · ${r.steps}회${r.demo ? " · 데모" : ""}` })));
+    text: `${r.run_id.slice(4, 17).replace("_", " ")} · ${r.player} · ${r.model_name} · ${r.steps}회${r.demo ? " · 데모" : ""}${r.hints + r.pauses ? " · ⭐개입" : ""}` })));
   const wanted = new URLSearchParams(location.search).get("run");
   const first = runs.some((r) => r.run_id === wanted) ? wanted : runs[0].run_id;
   $("run").value = first;

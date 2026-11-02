@@ -29,6 +29,8 @@ import com.badlogic.gdx.utils.JsonWriter;
 import com.watabou.noosa.Game;
 import com.watabou.utils.Callback;
 
+import java.io.File;
+
 //[nokpixel-ai-watcher] 게임 → AI 관찰기(ai-bridge/web.py) 통로 (docs/project/bridge.md 3장)
 //게임이 묻고 Python이 답한다. 응답은 다른 스레드에서 오므로 렌더 스레드로 넘겨서 돌려준다.
 //실패, 시간 초과, 이상한 응답은 모두 null로 돌려준다. 어떤 경우에도 게임을 멈추거나 끄지 않는다.
@@ -49,6 +51,34 @@ public class AIBridge {
 
 	public static void post( String path, JsonValue body, int timeout, Listener listener ){
 		send(Net.HttpMethods.POST, path, body.toJson(JsonWriter.OutputType.json), timeout, listener);
+	}
+
+	//AI 관찰기를 새 명령 창에서 켠다: ai-bridge 폴더에서 python web.py --panels (Windows 전용)
+	//게임을 실행한 폴더에서 위로 올라가며 ai-bridge/web.py를 찾는다. 못 찾거나 켜지 못하면 false
+	public static boolean launchWatcher(){
+		try {
+			if (!System.getProperty("os.name", "").startsWith("Windows")) return false;
+			File dir = findWatcherDir();
+			if (dir == null) return false;
+			//cmd /k: python이 오류로 끝나도 창이 남아서 오류 글을 볼 수 있다
+			new ProcessBuilder("cmd", "/c", "start", "\"nokpixel-ai-watcher\"", "/D", dir.getAbsolutePath(),
+					"cmd", "/k", "python", "web.py", "--panels")
+					.directory(dir)
+					.start();
+			return true;
+		} catch (Exception e) {
+			return false;
+		}
+	}
+
+	private static File findWatcherDir(){
+		File dir = new File(System.getProperty("user.dir", ".")).getAbsoluteFile();
+		while (dir != null) {
+			File candidate = new File(dir, "ai-bridge");
+			if (new File(candidate, "web.py").isFile()) return candidate;
+			dir = dir.getParentFile();
+		}
+		return null;
 	}
 
 	public static JsonValue object(){

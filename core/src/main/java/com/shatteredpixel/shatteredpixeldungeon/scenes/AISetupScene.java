@@ -30,7 +30,6 @@ import com.shatteredpixel.shatteredpixeldungeon.GamesInProgress;
 import com.shatteredpixel.shatteredpixeldungeon.SPDSettings;
 import com.shatteredpixel.shatteredpixeldungeon.ShatteredPixelDungeon;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
-import com.shatteredpixel.shatteredpixeldungeon.sprites.CharSprite;
 import com.shatteredpixel.shatteredpixeldungeon.ui.ActionIndicator;
 import com.shatteredpixel.shatteredpixeldungeon.ui.RenderedTextBlock;
 import com.shatteredpixel.shatteredpixeldungeon.ui.StyledButton;
@@ -45,6 +44,7 @@ import com.watabou.utils.RectF;
 
 //[nokpixel-ai-watcher] 캐릭터 선택 뒤에 AI 판을 설정하는 장면 (docs/project/bridge.md 2장)
 //AI 관찰기(Python web.py)에 상태를 묻고, 키 보내기·연결 시험·판 준비를 한다 (bridge.md 3장 ①~④).
+//관찰기가 꺼져 있으면 [AI 관찰기 켜기]로 이 컴퓨터에서 바로 켤 수 있다. AI 판은 언제나 실제 조작이다.
 //[AI 없이 시작]과 [뒤로]는 Python과 관계없이 언제나 원작과 같이 동작한다.
 public class AISetupScene extends PixelScene {
 
@@ -53,18 +53,17 @@ public class AISetupScene extends PixelScene {
 	private static final int SECTION_COLOR = 0xAAAAAA;
 	private static final float STATUS_EVERY = 3f; //장면에 있는 동안 상태 조회 간격(초)
 	private static final int LESSONS_MAX = 8; //교훈 고르기 창에 보여 줄 최근 판 수
+	private static final float LAUNCH_WAIT = 20f; //[AI 관찰기 켜기] 뒤 연결을 기다리는 최대 시간(초)
 
 	private StyledButton btnModel;
 	private StyledButton btnGuide;
 	private RenderedTextBlock keyStatus;
 	private StyledButton btnKey;
 	private StyledButton btnTest;
-	private StyledButton btnMode;
 	private StyledButton btnSteps;
 	private StyledButton btnLessons;
 	private StyledButton btnPlayer;
 	private StyledButton btnStartAI;
-	private ColorBlock[] liveFrame;
 	private RenderedTextBlock notice;
 
 	//AI 관찰기와 주고받은 상태
@@ -77,6 +76,7 @@ public class AISetupScene extends PixelScene {
 	private String testReason; //고른 모델 회사의 마지막 ③ 결과 (성공이면 null)
 	private boolean sendingKey;
 	private boolean starting;
+	private float launching; //[AI 관찰기 켜기]를 누른 뒤 남은 기다림(초). 0이면 켜는 중이 아님
 	private boolean runFailed;
 	private String flash; //한 번만 보이는 안내. 버튼을 하나 누르면 지운다
 	private boolean destroyed;
@@ -154,10 +154,12 @@ public class AISetupScene extends PixelScene {
 		btnTest = button("", new Runnable() {
 			@Override
 			public void run() {
-				if (connected() && !status.getBoolean("running", false)) {
-					testKey();
-				} else {
+				if (!connected()) {
+					launchWatcher();
+				} else if (status.getBoolean("running", false)) {
 					requestStatus(); //[관찰기 다시 확인]
+				} else {
+					testKey();
 				}
 			}
 		});
@@ -167,20 +169,6 @@ public class AISetupScene extends PixelScene {
 
 		//묶음 2: 실험 옵션
 		pos = section(Messages.get(this, "section_options"), left, pos, width);
-
-		btnMode = button("", new Runnable() {
-			@Override
-			public void run() {
-				SPDSettings.aiDryRun(!SPDSettings.aiDryRun());
-			}
-		});
-		liveFrame = new ColorBlock[4];
-		for (int i = 0; i < liveFrame.length; i++) {
-			liveFrame[i] = new ColorBlock(1, 1, 0xFF000000 | CharSprite.NEGATIVE);
-			add(liveFrame[i]);
-		}
-		pos = place(btnMode, left, pos, width);
-		frame(btnMode);
 
 		btnSteps = button("", new Runnable() {
 			@Override
@@ -238,8 +226,6 @@ public class AISetupScene extends PixelScene {
 		notice.maxWidth(width);
 		notice.setPos(left, pos);
 		add(notice);
-		if (!SPDSettings.aiDryRun()) flash = Messages.get(this, "last_was_live");
-
 		refresh();
 		requestStatus();
 		fadeIn();
@@ -252,6 +238,14 @@ public class AISetupScene extends PixelScene {
 		if (!statusInFlight) {
 			sinceStatus += Game.elapsed;
 			if (sinceStatus >= STATUS_EVERY) requestStatus();
+		}
+		if (launching > 0) {
+			launching -= Game.elapsed;
+			if (launching <= 0) {
+				launching = 0;
+				if (!connected()) flash = Messages.get(this, "launch_timeout");
+				refresh();
+			}
 		}
 	}
 
@@ -295,18 +289,6 @@ public class AISetupScene extends PixelScene {
 		return line.y + 3;
 	}
 
-	//실제 조작일 때 판 방식 버튼 둘레에 그리는 빨간 테두리
-	private void frame(StyledButton btn) {
-		liveFrame[0].size(btn.width() + 2, 1);
-		liveFrame[0].x = btn.left() - 1; liveFrame[0].y = btn.top() - 1;
-		liveFrame[1].size(btn.width() + 2, 1);
-		liveFrame[1].x = btn.left() - 1; liveFrame[1].y = btn.bottom();
-		liveFrame[2].size(1, btn.height());
-		liveFrame[2].x = btn.left() - 1; liveFrame[2].y = btn.top();
-		liveFrame[3].size(1, btn.height());
-		liveFrame[3].x = btn.right(); liveFrame[3].y = btn.top();
-	}
-
 	// ---------------- AI 관찰기와 주고받기 ----------------
 
 	private boolean connected() {
@@ -328,6 +310,7 @@ public class AISetupScene extends PixelScene {
 				status = body != null && body.has("models") && body.get("models").size > 0 ? body : null;
 				if (status != null) {
 					everConnected = true;
+					launching = 0;
 					fixChoices();
 					JsonValue key = key();
 					if (key != null && key.getBoolean("tested_ok", false)) testReason = null;
@@ -381,6 +364,16 @@ public class AISetupScene extends PixelScene {
 		});
 	}
 
+	//AI 관찰기(web.py)를 이 컴퓨터에서 켠다. 켜지면 3초마다 하는 ①이 저절로 이어 준다
+	private void launchWatcher() {
+		if (launching > 0) return;
+		if (AIBridge.launchWatcher()) {
+			launching = LAUNCH_WAIT;
+		} else {
+			flash = Messages.get(this, "launch_failed");
+		}
+	}
+
 	//④ 판 설정 확정. 성공하면 원래 시작 순서로 던전에 들어간다. 실패하면 장면에 머문다
 	private void startWithAI() {
 		if (!canStartAI()) return;
@@ -388,7 +381,7 @@ public class AISetupScene extends PixelScene {
 		body.addChild("player", new JsonValue(SPDSettings.aiPlayer()));
 		body.addChild("model", new JsonValue(SPDSettings.aiModel()));
 		body.addChild("guide", new JsonValue(SPDSettings.aiGuide()));
-		body.addChild("dry_run", new JsonValue(SPDSettings.aiDryRun()));
+		body.addChild("dry_run", new JsonValue(false)); //게임에서 시작하는 AI 판은 언제나 실제 조작 (생각만 하기는 mvp.py --dry-run)
 		body.addChild("steps", new JsonValue(SPDSettings.aiSteps()));
 		body.addChild("lessons_from", new JsonValue(SPDSettings.aiLessonsFrom()));
 		body.addChild("hero_class", new JsonValue(GamesInProgress.selectedClass != null ? GamesInProgress.selectedClass.name() : ""));
@@ -498,12 +491,16 @@ public class AISetupScene extends PixelScene {
 		keyStatus.text(keyLine());
 		btnKey.enable(online && !sendingKey && !testing && !starting);
 
-		//[연결 시험]과 [관찰기 다시 확인]은 같은 자리를 쓰므로 글자와 색을 분명히 다르게 한다
+		//[연결 시험], [AI 관찰기 켜기], [관찰기 다시 확인]은 같은 자리를 쓰므로 글자와 색을 분명히 다르게 한다
 		if (testing) {
 			btnTest.text(Messages.get(this, "testing_btn"));
 			btnTest.textColor(0xFFFFFF);
 			btnTest.enable(false);
-		} else if (!online || running) {
+		} else if (!online) {
+			btnTest.text(Messages.get(this, launching > 0 ? "launching_btn" : "launch"));
+			btnTest.textColor(Window.TITLE_COLOR);
+			btnTest.enable(launching <= 0);
+		} else if (running) {
 			btnTest.text(Messages.get(this, "recheck"));
 			btnTest.textColor(Window.TITLE_COLOR);
 			btnTest.enable(true);
@@ -514,12 +511,6 @@ public class AISetupScene extends PixelScene {
 			btnTest.enable(key != null && key.getBoolean("present", false) && !starting);
 		}
 
-		boolean live = !SPDSettings.aiDryRun();
-		btnMode.text(Messages.get(this, "mode", Messages.get(this, live ? "mode_live" : "mode_dry")));
-		if (live) btnMode.textColor(CharSprite.NEGATIVE);
-		else btnMode.textColor(0xFFFFFF);
-		for (ColorBlock line : liveFrame) line.visible = live;
-
 		btnSteps.text(Messages.get(this, "steps", SPDSettings.aiSteps()));
 
 		String lessons = SPDSettings.aiLessonsFrom();
@@ -529,7 +520,7 @@ public class AISetupScene extends PixelScene {
 
 		btnPlayer.text(Messages.get(this, "player", SPDSettings.aiPlayer()));
 
-		btnStartAI.text(Messages.get(this, live ? "start_ai_live" : "start_ai"));
+		btnStartAI.text(Messages.get(this, "start_ai"));
 		btnStartAI.enable(canStartAI()); //글자를 바꾸면 흐림이 풀려서 마지막에 건다
 
 		notice.text(noticeText());
@@ -553,6 +544,7 @@ public class AISetupScene extends PixelScene {
 		if (starting) return Messages.get(this, "preparing");
 		if (!connected()) {
 			if (checking) return Messages.get(this, "checking");
+			if (launching > 0) return Messages.get(this, "launching");
 			return Messages.get(this, everConnected ? "disconnected" : "python_off");
 		}
 		if (status.getBoolean("running", false)) return Messages.get(this, "other_run");

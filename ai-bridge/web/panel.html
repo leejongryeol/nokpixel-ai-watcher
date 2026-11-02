@@ -21,22 +21,16 @@
   .goals { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 13px; }
   .goals dt { color: var(--muted); }
   .goals dd { margin: 0; font-weight: 700; }
-  .now { flex: 1 1 180px; min-height: 140px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
-  .thought { flex: 1; min-height: 0; overflow: auto; font-size: 19px; line-height: 1.6; }
-  .row { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 14px; }
+  .now { flex: 1 1 360px; min-height: 300px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+  .now .panel-title .btn { height: 26px; padding: 0 8px; font-size: 12px; margin-left: 8px; }
+  .thought { flex: 1; min-height: 0; overflow: auto; font-size: 20px; line-height: 1.7; }
+  .row { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 16px; line-height: 1.5; }
   .row b { color: var(--muted); font-weight: 500; margin-right: 4px; }
   .soonbox { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; }
   .soonbox span.s { padding: 3px 8px; border: 1px dashed var(--line); border-radius: 6px; }
-  .recent { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; }
-  .recent .head { display: flex; align-items: center; gap: 8px; }
-  .recent .head .btn { height: 30px; padding: 0 10px; font-size: 13px; margin-left: auto; }
-  .list { display: flex; flex-direction: column; gap: 3px; max-height: 190px; overflow: auto; }
-  .item { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 4px 8px; border-radius: 6px; border: 1px solid transparent; background: none; color: var(--text); font-size: 13px; text-align: left; cursor: pointer; }
-  .item:hover { border-color: var(--line); }
-  .item .act { color: var(--text-soft); }
-  .item .tag { font-size: 11px; padding: 1px 5px; }
   .star { padding: 4px 8px; border-radius: 6px; background: var(--purple-bg); border: 1px dashed #8d77b8; color: var(--purple); font-size: 12.5px; line-height: 1.4; }
   .star.pending { opacity: 0.75; }
+  #pending { display: flex; flex-direction: column; gap: 4px; }
   .hintform { display: flex; flex-direction: column; gap: 6px; }
   .hintform .row { display: flex; gap: 8px; }
   .hintform input { flex: 1; height: 40px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-deep); color: var(--text); font-size: 14px; }
@@ -71,7 +65,7 @@
   </dl>
 
   <section class="now panel">
-    <div class="panel-title" style="margin: 0">지금 생각 <span id="when" class="mono"></span></div>
+    <div class="panel-title" style="margin: 0">지금 생각 <span id="when" class="mono"></span><button id="open-step" class="btn hidden" type="button">기록 창에서 보기</button></div>
     <div id="thought" class="thought">—</div>
     <div class="row"><span><b>행동</b><span id="action">—</span></span></div>
     <div class="row"><span><b>근거</b><span id="basis">—</span></span><span id="check" class="muted"></span></div>
@@ -83,16 +77,9 @@
     <span class="s">진행도 —/51점</span><span class="s">보스 처치 —</span><span class="soon-tag">준비 중</span>
   </section>
 
-  <section class="recent panel">
-    <div class="head">
-      <span class="panel-title" style="margin: 0">최근 판단 (최신이 위)</span>
-      <button id="open-log" class="btn" type="button">기록 창 열기</button>
-    </div>
-    <div id="list" class="list" role="list" aria-label="최근 판단"><div class="empty">시작하면 판단이 여기에 쌓여요.</div></div>
-  </section>
-
   <form id="hintform" class="hintform panel">
     <label for="hint" class="panel-title" style="margin: 0; color: var(--purple); font-weight: 700">개발자 개입 · 다음 판단 때 AI에게 전달 (힌트만, 조종 불가)</label>
+    <div id="pending" class="hidden" role="list" aria-label="전달을 기다리는 힌트"></div>
     <div class="row">
       <input id="hint" type="text" placeholder="힌트를 입력하세요" autocomplete="off" disabled>
       <button id="send" type="submit" disabled>보내기</button>
@@ -106,6 +93,7 @@
     <button id="stop" class="btn danger" type="button" disabled>■ 중지</button>
     <button id="layout" class="btn" type="button">⊞ 창 배치</button>
     <button id="focus" class="btn" type="button" disabled>게임 창 앞으로</button>
+    <button id="open-log" class="btn" type="button">기록 창 열기</button>
     <span id="msg" class="help"></span>
   </div>
   <p id="error" class="notice error hidden" style="margin: 0; padding: 6px 10px; font-size: 13px"></p>
@@ -122,7 +110,6 @@
 <script src="/static/common.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
-const RECENT = 5;  // 패널에 보여 줄 최근 판단 수 (전부는 기록 창에서)
 let runId = null, config = null, entries = [], pending = [], running = null, logWindow = null;
 const HERO = { WARRIOR: "전사", MAGE: "마법사", ROGUE: "도적", HUNTRESS: "사냥꾼", DUELIST: "결투가", CLERIC: "성직자" };
 
@@ -179,6 +166,7 @@ function openLog(step) {
   logWindow = window.open(url, "nokpixel-log", features);
 }
 $("open-log").addEventListener("click", () => openLog());
+$("open-step").addEventListener("click", () => { const e = entries[entries.length - 1]; if (e) openLog(e.step); });
 
 // ----- 개입 (힌트) -----
 const typing = (on) => api("/api/typing", { method: "POST", body: { on } }).catch(() => {});
@@ -212,17 +200,10 @@ function light(s) {
   return s.game_front ? ["green", "입력 가능"] : ["yellow", "게임 창이 뒤에 있음"];
 }
 
-function renderList() {
-  const rows = pending.map((text) => el("div", { class: "star pending", text: "⭐ 대기 · 다음 판단 때 전달: " + text }));
-  for (const e of entries.slice(-RECENT).reverse()) {
-    rows.push(el("button", { class: "item", type: "button", role: "listitem", title: "기록 창에서 자세히 보기", onclick: () => openLog(e.step) },
-      el("b", { text: `판단 ${e.step}` }),
-      el("span", { class: "act", text: actionLabel(e, config) }),
-      entryKinds(e).filter((k) => k !== "hint").map((k) => el("span", { class: "tag " + k, text: KIND_LABEL[k] }))));
-    // 힌트는 이 판단 바로 전에 받은 것이라 판단 아래(더 이른 시점)에 끼운다
-    (e.hints || []).forEach((h) => rows.push(el("div", { class: "star", text: "⭐ 개발자 개입 · " + h })));
-  }
-  $("list").replaceChildren(...(rows.length ? rows : [el("div", { class: "empty", text: "시작하면 판단이 여기에 쌓여요." })]));
+// 판단 목록은 기록 창에서 본다. 패널에는 아직 전달되지 않은 힌트만 보인다
+function renderPending() {
+  $("pending").replaceChildren(...pending.map((text) => el("div", { class: "star pending", role: "listitem", text: "⭐ 대기 · 다음 판단 때 전달: " + text })));
+  $("pending").classList.toggle("hidden", !pending.length);
 }
 
 function renderNow(s) {
@@ -249,6 +230,7 @@ function renderNow(s) {
   const latest = entries[entries.length - 1];
   if (!latest) return;
   $("when").textContent = `· 판단 ${latest.step}`;
+  $("open-step").classList.remove("hidden");
   $("thought").textContent = latest.thought || "(생각 없음)";
   $("action").textContent = actionLabel(latest, c);
   $("basis").textContent = latest.basis ? (BASIS_ICON[latest.basis] || latest.basis) : "—";
@@ -261,7 +243,7 @@ function render(s) {
   if (s.run_id !== runId) {  // 새 판: 이번 응답은 지난 판 기준(since)이라 버리고, 다음에 처음부터 받는다
     const first = runId === null;
     runId = s.run_id; entries = []; pending = [];
-    renderList();
+    renderPending();
     if (!first) return;
   }
   config = s.config;
@@ -275,11 +257,11 @@ function render(s) {
   $("send").disabled = !running;
   if (s.status === "error") showError("오류로 멈췄어요: " + s.error);
 
-  const before = entries.length, pendingBefore = pending.join("\n");
+  const pendingBefore = pending.join("\n");
   entries = entries.concat(s.entries.filter((e) => !entries.length || e.step > entries[entries.length - 1].step));
   pending = s.pending_hints;
   $("hint-count").textContent = entries.reduce((n, e) => n + (e.hints ? e.hints.length : 0), 0) + pending.length;
-  if (entries.length !== before || pending.join("\n") !== pendingBefore) renderList();
+  if (pending.join("\n") !== pendingBefore) renderPending();
   renderNow(s);
 }
 

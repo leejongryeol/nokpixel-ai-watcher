@@ -530,7 +530,7 @@ class Agent:
             "demo": bool(demo),
             "started_at": datetime.now().isoformat(timespec="seconds"),
         }
-        if game_run:  # 게임의 AI 설정에서 시작한 판: 캐릭터·제약·시드는 기록에만 남긴다 (AI 입력에는 넣지 않음)
+        if game_run:  # 게임의 AI 설정에서 시작한 판: 직업·제약은 AI 입력 [이번 판]에도 넣는다. 시드는 기록에만 남긴다
             self.config.update(game_run, started_from="game")
         safe_player = "".join(c for c in self.config["player"] if c.isalnum() or c in "-_") or "player"
         self.run_id = datetime.now().strftime("run_%Y%m%d_%H%M%S_") + safe_player
@@ -679,6 +679,23 @@ class Agent:
         self._save_config()
 
     # ----- 실행 -----
+    def system_prompt(self):
+        """AI에게 주는 규칙. 순서: 규칙 → [이번 판](게임에서 시작한 판만) → 공략 → 교훈."""
+        system = SYSTEM_PROMPT
+        if self.config.get("started_from") == "game":  # 화면에 보이는 직업·제약 이름만. 시드는 넣지 않는다
+            system += "\n\n[이번 판]\n직업: " + (self.config.get("hero_title") or self.config.get("hero_class") or "?")
+            if self.config.get("challenge_titles"):
+                system += "\n제약: " + ", ".join(self.config["challenge_titles"])
+        if self.config["guide"]:
+            guide = load_guide()
+            if guide:
+                system += "\n\n[공략 문서]\n" + guide
+        if self.inherited_lessons:
+            system += ("\n\n[지난 판의 네가 남긴 교훈]\n"
+                       "지난 판에서 네가 직접 겪고 쓴 교훈이다. 이번 판에서 틀린 것으로 보이면 따르지 않아도 된다.\n"
+                       + self.inherited_lessons)
+        return system
+
     def run(self):
         self.prepare()
         if self.inherited_lessons:  # 어떤 교훈을 받고 시작했는지 이 판 폴더에도 남긴다
@@ -697,15 +714,7 @@ class Agent:
                 self.input_lock.start(game.hwnd)
             if not self.config["demo"]:
                 client = LLM(self.config["model"])
-            system = SYSTEM_PROMPT
-            if self.config["guide"]:
-                guide = load_guide()
-                if guide:
-                    system += "\n\n[공략 문서]\n" + guide
-            if self.inherited_lessons:
-                system += ("\n\n[지난 판의 네가 남긴 교훈]\n"
-                           "지난 판에서 네가 직접 겪고 쓴 교훈이다. 이번 판에서 틀린 것으로 보이면 따르지 않아도 된다.\n"
-                           + self.inherited_lessons)
+            system = self.system_prompt()
 
             for step in range(1, self.config["steps"] + 1):
                 self._wait_while_typing()

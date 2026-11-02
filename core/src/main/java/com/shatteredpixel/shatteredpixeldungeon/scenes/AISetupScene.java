@@ -386,13 +386,20 @@ public class AISetupScene extends PixelScene {
 		body.addChild("steps", new JsonValue(SPDSettings.aiSteps()));
 		body.addChild("lessons_from", new JsonValue(SPDSettings.aiLessonsFrom()));
 		body.addChild("hero_class", new JsonValue(GamesInProgress.selectedClass != null ? GamesInProgress.selectedClass.name() : ""));
+		//AI 입력의 [이번 판]에 쓰는 이름: 게임 화면에 보이는 언어 그대로
+		body.addChild("hero_title", new JsonValue(GamesInProgress.selectedClass != null ? GamesInProgress.selectedClass.title() : ""));
 		int challenges = SPDSettings.challenges();
 		body.addChild("challenges", new JsonValue(challenges));
 		JsonValue names = new JsonValue(JsonValue.ValueType.array);
+		JsonValue titles = new JsonValue(JsonValue.ValueType.array);
 		for (int i = 0; i < Challenges.MASKS.length; i++) {
-			if ((challenges & Challenges.MASKS[i]) != 0) names.addChild(new JsonValue(Challenges.NAME_IDS[i]));
+			if ((challenges & Challenges.MASKS[i]) != 0) {
+				names.addChild(new JsonValue(Challenges.NAME_IDS[i]));
+				titles.addChild(new JsonValue(Messages.get(Challenges.class, Challenges.NAME_IDS[i])));
+			}
 		}
 		body.addChild("challenge_names", names);
+		body.addChild("challenge_titles", titles);
 		body.addChild("custom_seed", new JsonValue(SPDSettings.customSeed()));
 
 		starting = true;

@@ -256,6 +256,11 @@ def clean_id(value, limit):
     return re.sub(r"[^A-Za-z0-9_]", "", str(value or ""))[:limit]
 
 
+def clean_name(value, limit):
+    """게임 화면의 이름(한국어 가능). 줄바꿈·제어 문자를 빼고 한 줄로 자른다."""
+    return " ".join("".join(c if c.isprintable() else " " for c in str(value or "")).split())[:limit]
+
+
 @app.post("/api/bridge/run")
 @bridge_only
 def bridge_run():
@@ -275,11 +280,14 @@ def bridge_run():
         except (TypeError, ValueError):
             challenges = 0
         names = data.get("challenge_names")
+        titles = data.get("challenge_titles")
         custom_seed = str(data.get("custom_seed") or "").strip()[:40]
         game_run = {
             "hero_class": clean_id(data.get("hero_class"), 20),
+            "hero_title": clean_name(data.get("hero_title"), 20),
             "challenges": challenges,
             "challenge_names": [clean_id(n, 40) for n in names][:20] if isinstance(names, list) else [],
+            "challenge_titles": [t for t in (clean_name(n, 40) for n in titles) if t][:20] if isinstance(titles, list) else [],
             "custom_seed": custom_seed,
         }
         try:

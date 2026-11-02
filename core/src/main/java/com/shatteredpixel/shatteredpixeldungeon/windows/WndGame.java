@@ -21,6 +21,8 @@
 
 package com.shatteredpixel.shatteredpixeldungeon.windows;
 
+import com.badlogic.gdx.utils.JsonValue;
+import com.shatteredpixel.shatteredpixeldungeon.AIBridge;
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
 import com.shatteredpixel.shatteredpixeldungeon.GamesInProgress;
 import com.shatteredpixel.shatteredpixeldungeon.SPDSettings;
@@ -45,6 +47,7 @@ public class WndGame extends Window {
 	private static final int GAP		= 2;
 	
 	private int pos;
+	private boolean closed; //[nokpixel-ai-watcher] 창이 닫힌 뒤 온 관찰기 응답은 버린다
 	
 	public WndGame() {
 		
@@ -60,6 +63,33 @@ public class WndGame extends Window {
 			}
 		});
 		curBtn.icon(Icons.get(Icons.PREFS));
+
+		//[nokpixel-ai-watcher] AI 관찰기 켜기: 꺼져 있으면 켜기만 한다. AI 판은 시작하지 않는다
+		addButton( curBtn = new RedButton( Messages.get(this, "watcher") ) {
+			@Override
+			protected void onClick() {
+				final RedButton btn = this;
+				btn.text(Messages.get(WndGame.class, "watcher_checking"));
+				btn.enable(false);
+				AIBridge.get("/api/bridge/status", new AIBridge.Listener() {
+					@Override
+					public void onResult(JsonValue body) {
+						if (closed) return;
+						if (body != null && body.has("models")) {
+							btn.text(Messages.get(WndGame.class, "watcher_on"));
+							btn.enable(false); //글자를 바꾸면 흐림이 풀려서 다시 건다
+						} else if (AIBridge.launchWatcher()) {
+							btn.text(Messages.get(WndGame.class, "watcher_launching"));
+							btn.enable(false);
+						} else {
+							btn.text(Messages.get(WndGame.class, "watcher_failed"));
+							btn.enable(true);
+						}
+					}
+				});
+			}
+		});
+		curBtn.textColor(Window.TITLE_COLOR);
 
 		// Challenges window
 		if (Dungeon.challenges > 0) {
@@ -115,6 +145,12 @@ public class WndGame extends Window {
 		resize( WIDTH, pos );
 	}
 	
+	@Override
+	public void destroy() {
+		closed = true;
+		super.destroy();
+	}
+
 	private void addButton( RedButton btn ) {
 		add( btn );
 		btn.setRect( 0, pos > 0 ? pos += GAP : 0, WIDTH, BTN_HEIGHT );

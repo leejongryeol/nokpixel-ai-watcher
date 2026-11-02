@@ -55,6 +55,7 @@ public class AISetupScene extends PixelScene {
 	private static final int LESSONS_MAX = 8; //교훈 고르기 창에 보여 줄 최근 판 수
 	private static final float LAUNCH_WAIT = 20f; //[AI 관찰기 켜기] 뒤 연결을 기다리는 최대 시간(초)
 
+	private StyledButton btnWatcher;
 	private StyledButton btnModel;
 	private StyledButton btnGuide;
 	private RenderedTextBlock keyStatus;
@@ -120,6 +121,15 @@ public class AISetupScene extends PixelScene {
 		//묶음 1: 매번 보는 것
 		pos = section(Messages.get(this, "section_always"), left, pos, width);
 
+		//관찰기 켜기는 따로 한 줄. 켜져 있으면 회색 "켜져 있음"으로 남겨 지금 상태를 보여 준다
+		btnWatcher = button("", new Runnable() {
+			@Override
+			public void run() {
+				if (!connected()) launchWatcher();
+			}
+		});
+		pos = place(btnWatcher, left, pos, width);
+
 		btnModel = button("", new Runnable() {
 			@Override
 			public void run() {
@@ -155,13 +165,7 @@ public class AISetupScene extends PixelScene {
 		btnTest = button("", new Runnable() {
 			@Override
 			public void run() {
-				if (!connected()) {
-					launchWatcher();
-				} else if (status.getBoolean("running", false)) {
-					requestStatus(); //[관찰기 다시 확인]
-				} else {
-					testKey();
-				}
+				testKey();
 			}
 		});
 		btnTest.setRect(left + half + GAP, pos, half, BTN_HEIGHT);
@@ -515,25 +519,21 @@ public class AISetupScene extends PixelScene {
 		keyStatus.text(keyLine());
 		btnKey.enable(online && !sendingKey && !testing && !starting);
 
-		//[연결 시험], [AI 관찰기 켜기], [관찰기 다시 확인]은 같은 자리를 쓰므로 글자와 색을 분명히 다르게 한다
-		if (testing) {
-			btnTest.text(Messages.get(this, "testing_btn"));
-			btnTest.textColor(0xFFFFFF);
-			btnTest.enable(false);
-		} else if (!online) {
-			btnTest.text(Messages.get(this, launching > 0 ? "launching_btn" : "launch"));
-			btnTest.textColor(Window.TITLE_COLOR);
-			btnTest.enable(launching <= 0);
-		} else if (running) {
-			btnTest.text(Messages.get(this, "recheck"));
-			btnTest.textColor(Window.TITLE_COLOR);
-			btnTest.enable(true);
+		//꺼져 있으면 노란 [AI 관찰기 켜기], 켜는 중·켜져 있으면 회색으로 상태만 보여 준다
+		if (online) {
+			btnWatcher.text(Messages.get(this, "watcher_on"));
+			btnWatcher.textColor(0xFFFFFF);
+			btnWatcher.enable(false);
 		} else {
-			btnTest.text(Messages.get(this, "key_test"));
-			btnTest.textColor(0xFFFFFF);
-			JsonValue key = key();
-			btnTest.enable(key != null && key.getBoolean("present", false) && !starting);
+			btnWatcher.text(Messages.get(this, launching > 0 ? "launching_btn" : "launch"));
+			btnWatcher.textColor(Window.TITLE_COLOR);
+			btnWatcher.enable(launching <= 0);
 		}
+
+		//[연결 시험]은 관찰기가 켜져 있고 다른 판이 없을 때만 누를 수 있다
+		btnTest.text(Messages.get(this, testing ? "testing_btn" : "key_test"));
+		JsonValue key = key();
+		btnTest.enable(online && !running && !testing && !starting && key != null && key.getBoolean("present", false));
 
 		btnGoal.text(Messages.get(this, "goal", Messages.get(this, SPDSettings.aiGoal().isEmpty() ? "goal_default" : "goal_custom")));
 		btnSteps.text(Messages.get(this, "steps", SPDSettings.aiSteps()));

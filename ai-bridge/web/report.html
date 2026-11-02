@@ -171,7 +171,8 @@ function show(data) {
   $("result").textContent = `판단 ${es.length}회 · 마지막 목표 "${(last && last.goal) || "-"}"`;
   $("result-sub").textContent = `${(c.started_at || "").replace("T", " ")} 시작 · ` + (c.ended_reason  // 게임에서 시작한 판부터 기록됨
     ? `끝난 이유: ${END_LABEL[c.ended_reason] || c.ended_reason}` + (c.ended_depth ? ` · ${c.ended_depth}층` : "")
-    : "보스 처치·도달 층은 게임 코드 연결 후 기록돼요");
+    : "보스 처치·도달 층은 게임 코드 연결 후 기록돼요")
+    + (c.final_goal ? ` · 최종 목표: ${c.final_goal}` : "");  // 기본 목표가 아닌 판만
   $("t-steps").replaceChildren(String(es.length), el("small", { text: "회" }));
   $("t-tokens").textContent = number(tokens);
   $("t-cost").textContent = money(cost);

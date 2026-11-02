@@ -92,7 +92,7 @@
     <div class="panel">
       <p class="panel-title">목표</p>
       <div style="display: flex; flex-direction: column; gap: 6px">
-        <div class="goal-row"><span class="k">최종</span><b>🏆 5층 보스 "구" 처치</b></div>
+        <div class="goal-row"><span class="k">최종</span><b id="final-goal">🏆 5층 보스 "구" 처치</b></div>
         <div class="goal-row now"><span class="k">중간</span><b id="goal">🗺️ (아직 없음)</b></div>
         <div class="goal-row"><span class="k">실행</span><span id="action">🎮 -</span></div>
       </div>
@@ -169,6 +169,7 @@ function render(s) {
     return;
   }
   configChips($("chips"), s.config);
+  $("final-goal").textContent = "🏆 " + (s.config.final_goal || '5층 보스 "구" 처치');
   setStatus($("status"), s.status);
   $("stop").disabled = s.status !== "running";
   $("report-link").href = "/report?run=" + encodeURIComponent(s.run_id);

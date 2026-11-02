@@ -285,6 +285,7 @@ def bridge_run():
         game_run = {
             "hero_class": clean_id(data.get("hero_class"), 20),
             "hero_title": clean_name(data.get("hero_title"), 20),
+            "final_goal": clean_name(data.get("final_goal"), 100),  # 비어 있으면 기본 목표
             "challenges": challenges,
             "challenge_names": [clean_id(n, 40) for n in names][:20] if isinstance(names, list) else [],
             "challenge_titles": [t for t in (clean_name(n, 40) for n in titles) if t][:20] if isinstance(titles, list) else [],

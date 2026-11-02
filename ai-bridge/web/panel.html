@@ -60,7 +60,7 @@
   <p id="note" class="notice error hidden" style="margin: 0; padding: 6px 10px; font-size: 13px"></p>
 
   <dl class="goals panel" style="margin: 0">
-    <dt>최종 목표</dt><dd>지하 5층 보스 "구(Goo)" 처치</dd>
+    <dt>최종 목표</dt><dd id="final-goal">지하 5층 보스 "구(Goo)" 처치</dd>
     <dt>중간 목표</dt><dd id="goal">—</dd>
   </dl>
 
@@ -226,6 +226,7 @@ function renderNow(s) {
   $("note").textContent = notes.join(" / ");
   $("note").classList.toggle("hidden", !notes.length);
 
+  $("final-goal").textContent = c.final_goal || '지하 5층 보스 "구(Goo)" 처치';  // 게임의 AI 설정에서 바꾼 목표
   $("goal").textContent = s.goal || "—";
   const latest = entries[entries.length - 1];
   if (!latest) return;

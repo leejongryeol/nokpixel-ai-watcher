@@ -60,6 +60,7 @@ public class AISetupScene extends PixelScene {
 	private RenderedTextBlock keyStatus;
 	private StyledButton btnKey;
 	private StyledButton btnTest;
+	private StyledButton btnGoal;
 	private StyledButton btnSteps;
 	private StyledButton btnLessons;
 	private StyledButton btnPlayer;
@@ -170,13 +171,24 @@ public class AISetupScene extends PixelScene {
 		//묶음 2: 실험 옵션
 		pos = section(Messages.get(this, "section_options"), left, pos, width);
 
+		//최종 목표와 최대 판단은 글자가 짧아서 한 줄에 반씩 둔다 (세로 화면 자리)
+		btnGoal = button("", new Runnable() {
+			@Override
+			public void run() {
+				showGoalInput();
+			}
+		});
+		btnGoal.setRect(left, pos, half, BTN_HEIGHT);
+		align(btnGoal);
 		btnSteps = button("", new Runnable() {
 			@Override
 			public void run() {
 				showStepsInput();
 			}
 		});
-		pos = place(btnSteps, left, pos, width);
+		btnSteps.setRect(left + half + GAP, pos, half, BTN_HEIGHT);
+		align(btnSteps);
+		pos += BTN_HEIGHT + GAP;
 
 		btnLessons = button("", new Runnable() {
 			@Override
@@ -385,6 +397,7 @@ public class AISetupScene extends PixelScene {
 		body.addChild("dry_run", new JsonValue(false)); //게임에서 시작하는 AI 판은 언제나 실제 조작 (생각만 하기는 mvp.py --dry-run)
 		body.addChild("steps", new JsonValue(SPDSettings.aiSteps()));
 		body.addChild("lessons_from", new JsonValue(SPDSettings.aiLessonsFrom()));
+		body.addChild("final_goal", new JsonValue(SPDSettings.aiGoal())); //비어 있으면 기본 목표
 		body.addChild("hero_class", new JsonValue(GamesInProgress.selectedClass != null ? GamesInProgress.selectedClass.name() : ""));
 		//AI 입력의 [이번 판]에 쓰는 이름: 게임 화면에 보이는 언어 그대로
 		body.addChild("hero_title", new JsonValue(GamesInProgress.selectedClass != null ? GamesInProgress.selectedClass.title() : ""));
@@ -522,6 +535,7 @@ public class AISetupScene extends PixelScene {
 			btnTest.enable(key != null && key.getBoolean("present", false) && !starting);
 		}
 
+		btnGoal.text(Messages.get(this, "goal", Messages.get(this, SPDSettings.aiGoal().isEmpty() ? "goal_default" : "goal_custom")));
 		btnSteps.text(Messages.get(this, "steps", SPDSettings.aiSteps()));
 
 		String lessons = SPDSettings.aiLessonsFrom();
@@ -637,6 +651,24 @@ public class AISetupScene extends PixelScene {
 			public void onSelect(boolean positive, String text) {
 				if (!positive || text.trim().isEmpty()) return;
 				sendKey(text.trim());
+				refresh();
+			}
+		});
+	}
+
+	//최종 목표: 비우면 기본 목표. 바꾸면 지난 판과 실험 조건이 달라진다 (config.json의 final_goal로 구분)
+	private void showGoalInput() {
+		ShatteredPixelDungeon.scene().addToFront(new WndTextInput(
+				Messages.get(this, "goal_title"),
+				Messages.get(this, "goal_desc"),
+				SPDSettings.aiGoal(), 100, false,
+				Messages.get(this, "ok"),
+				Messages.get(this, "cancel")) {
+			@Override
+			public void onSelect(boolean positive, String text) {
+				if (!positive) return;
+				SPDSettings.aiGoal(text.trim());
+				flash = Messages.get(AISetupScene.class, text.trim().isEmpty() ? "goal_set_default" : "goal_set", text.trim());
 				refresh();
 			}
 		});

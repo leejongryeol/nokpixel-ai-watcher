@@ -82,6 +82,10 @@ def key_env(model):
 # ---------------------------------------------------------------------------
 # AI에게 주는 규칙과 도구 (Claude Plays Pokémon 방식: 짧은 규칙 + 생각은 글로 + 행동은 도구로)
 # ---------------------------------------------------------------------------
+# 최종 목표 기본값. AI 설정에서 바꾸지 않은 판은 아래 문구가 글자 그대로 들어간다 (지난 판과 비교)
+DEFAULT_GOAL = "지하 5층의 보스를 처치하는 것"
+DEFAULT_GOAL_SHORT = "5층 보스 처치"
+
 SYSTEM_PROMPT = """너는 던전 탐험 게임을 하고 있다. 매번 게임 화면 이미지와 최근 기록이 주어진다.
 
 [최종 목표] 지하 5층의 보스를 처치하는 것. 모든 판단은 이 목표를 향한다.
@@ -709,9 +713,27 @@ class Agent:
         self._save_config()
 
     # ----- 실행 -----
+    def custom_goal(self):
+        """AI 설정에서 직접 적은 최종 목표. 없으면 "" (기본 목표)."""
+        return (self.config.get("final_goal") or "").strip().rstrip(".")
+
+    def tools(self):
+        """도구 설명. 최종 목표를 바꾼 판만 check_goal 설명의 목표를 바꾼다."""
+        goal = self.custom_goal()
+        if not goal:
+            return TOOLS
+        tools = json.loads(json.dumps(TOOLS))
+        for tool in tools:
+            prop = tool["input_schema"]["properties"]["check_goal"]
+            prop["description"] = prop["description"].replace(f"최종 목표({DEFAULT_GOAL_SHORT})", f"최종 목표({goal})")
+        return tools
+
     def system_prompt(self):
         """AI에게 주는 규칙. 순서: 규칙 → [이번 판](게임에서 시작한 판만) → 공략 → 교훈."""
         system = SYSTEM_PROMPT
+        goal = self.custom_goal()
+        if goal:  # 기본 목표 문장만 바꾼다
+            system = system.replace(f"[최종 목표] {DEFAULT_GOAL}.", f"[최종 목표] {goal}.")
         if self.config.get("started_from") == "game":  # 화면에 보이는 직업·제약 이름만. 시드는 넣지 않는다
             system += "\n\n[이번 판]\n직업: " + (self.config.get("hero_title") or self.config.get("hero_class") or "?")
             if self.config.get("challenge_titles"):
@@ -934,7 +956,7 @@ class Agent:
             ("image", image),
             ("text", "생각을 쓰고 도구로 행동해라."),
         ]
-        return client.ask(content, 2048, system=system, tools=TOOLS)
+        return client.ask(content, 2048, system=system, tools=self.tools())
 
     def _prompt_text(self, hints, checkpoint):
         """판단 요청에 들어가는 글 부분 (최근 기록, 중간 목표, 기억 메모, 힌트, 큰 점검)."""
@@ -957,7 +979,7 @@ class Agent:
         if checkpoint:
             text += (f"\n\n[큰 점검 · {checkpoint}]\n"
                      "행동하기 전에 생각에 다음을 함께 써라. "
-                     "① 지금까지 최종 목표(5층 보스 처치)에 가까워졌는가 "
+                     f"① 지금까지 최종 목표({self.custom_goal() or DEFAULT_GOAL_SHORT})에 가까워졌는가 "
                      "② 지금 중간 목표가 여전히 맞는가 "
                      "③ 기억 메모 중 근거가 약하거나 틀린 것은 없는가 (있으면 memo_remove)")
         return text
@@ -995,7 +1017,7 @@ class Agent:
             for e in self.entries[-150:])
         memo = "\n".join(f"- {m['id']}: {m['text']}" for m in self.memo) or "(없음)"
         prompt = f"""방금 던전 게임 한 판이 끝났다. 끝난 이유: {ending}
-최종 목표는 지하 5층의 보스 처치였다. 마지막 화면(마지막 행동까지 끝난 뒤의 화면)을 보면 캐릭터가 살아 있는지, 몇 층인지 알 수 있다.
+{f"최종 목표: {self.custom_goal()}." if self.custom_goal() else "최종 목표는 지하 5층의 보스 처치였다."} 마지막 화면(마지막 행동까지 끝난 뒤의 화면)을 보면 캐릭터가 살아 있는지, 몇 층인지 알 수 있다.
 
 [이번 판의 판단 기록]
 {log}

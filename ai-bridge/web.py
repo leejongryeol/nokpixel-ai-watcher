@@ -317,6 +317,45 @@ def bridge_arrived():
     return jsonify({"ok": True})
 
 
+def running_agent(run_id):
+    a = current()
+    return a if a and a.status == "running" and run_id == a.run_id else None
+
+
+def int_or_none(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+@app.post("/api/bridge/heartbeat")
+@bridge_only
+def bridge_heartbeat():
+    """⑦ 게임이 AI 판 동안 1초마다 보내는 살아 있음 신호. ok가 false면 게임은 신호를 멈춘다."""
+    data = body()
+    a = running_agent(data.get("run_id"))
+    if not a:
+        return jsonify({"ok": False, "reason": "not_running"}), 409
+    a.heartbeat(data.get("alive") is not False, int_or_none(data.get("depth")))
+    return jsonify({"ok": True})
+
+
+@app.post("/api/bridge/ended")
+@bridge_only
+def bridge_ended():
+    """⑥ 판 끝 (died / won / quit). 받으면 바로 키 보내기를 멈추고 입력 잠금을 푼다."""
+    data = body()
+    reason = data.get("reason")
+    if reason not in ("died", "won", "quit"):
+        return jsonify({"ok": False, "reason": "bad_reason"}), 400
+    a = running_agent(data.get("run_id"))
+    if not a:
+        return jsonify({"ok": False, "reason": "not_running"}), 409
+    a.end_game(reason, int_or_none(data.get("depth")))
+    return jsonify({"ok": True})
+
+
 def discard_pending_dir(old, keep):
     """바뀐 대기 판의 폴더는 config.json만 있으면 지운다 (판단 기록이 있는 폴더는 지우지 않는다)."""
     if not old or os.path.normcase(old.run_dir) == os.path.normcase(keep):

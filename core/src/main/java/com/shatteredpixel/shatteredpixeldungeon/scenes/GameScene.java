@@ -807,6 +807,7 @@ public class GameScene extends PixelScene {
 		}
 
 		Emitter.freezeEmitters = false;
+		AIBridge.onLeaveGame(); //[nokpixel-ai-watcher] AI 판 끝: 승리·타이틀로·게임 종료 (층 이동은 제외)
 		
 		scene = null;
 		Badges.saveGlobal();
@@ -1572,6 +1573,7 @@ public class GameScene extends PixelScene {
 
 	public static void gameOver() {
 		if (scene == null) return;
+		AIBridge.onGameOver(); //[nokpixel-ai-watcher] AI 판 끝: 사망 (docs/project/bridge.md)
 
 		Banner gameOver = new Banner( BannerSprites.get( BannerSprites.Type.GAME_OVER ) );
 		gameOver.show( 0x000000, 2f );

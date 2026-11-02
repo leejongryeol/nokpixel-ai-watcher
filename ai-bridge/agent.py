@@ -51,6 +51,13 @@ FOCUS_RETRIES = 3  # 게임 창을 맨 앞으로 가져오기 시도 횟수 (입
 FOCUS_WAIT_SECONDS = 30  # 그래도 못 가져오면 다시 시도하며 기다리는 최대 시간(초). 넘으면 판을 멈춘다
 FOCUS_WAIT_INTERVAL = 2  # 기다리는 동안 다시 시도하는 간격(초)
 TYPING_WAIT_SECONDS = 60  # 관찰자가 힌트를 입력하는 동안 다음 판단을 미루는 최대 시간(초)
+# 게임에서 시작한 판: 게임이 1초마다 보내는 살아 있음 신호(⑦)를 키마다 확인한다 (bridge.md 9장 A-5-4)
+HEARTBEAT_STALE = 3  # 신호가 이 시간(초)보다 오래되면 키를 보내지 않고 기다린다 (층 이동 로딩 등)
+HEARTBEAT_WAIT = 30  # 그래도 신호가 안 오면 이 시간(초) 뒤 판을 끝낸다 (lost_game)
+# 판이 끝난 이유 (config.json의 ended_reason)
+END_REASONS = {"died": "캐릭터가 죽음", "won": "승리", "quit": "게임 메뉴에서 타이틀로 나감",
+               "game_closed": "게임이 꺼짐", "lost_game": "게임 신호가 끊김",
+               "max_steps": "정해진 판단 횟수를 다 씀", "stopped": "관찰자가 중지함", "error": "오류로 멈춤"}
 
 MODELS = {  # price: 100만 토큰당 (입력, 출력) 달러
     "claude-haiku-4-5-20251001": {"name": "Haiku 4.5", "provider": "anthropic", "price": (1.0, 5.0)},
@@ -307,9 +314,13 @@ class WindowsGame:
         self.window_size = None  # 마지막으로 찍은 게임 창 안쪽 크기 (config.json 기록용)
         self.stop_event = None  # 에이전트의 중지 신호 (게임 창을 기다리는 중에도 중지할 수 있게)
         self.waiting_focus = False  # 게임 창을 맨 앞으로 가져오지 못해 기다리는 중
+        self.guard = None  # 키·클릭 하나마다 먼저 부르는 확인 (판이 끝났으면 StopRequested)
 
     def is_front(self):
         return self.user32.GetForegroundWindow() == self.hwnd
+
+    def exists(self):
+        return bool(self.user32.IsWindow(self.hwnd))
 
     def _client_box(self):
         rect = self.wintypes.RECT()
@@ -410,10 +421,14 @@ class WindowsGame:
         if action["tool"] == "press_keys":
             for key in action["input"].get("keys", [])[:3]:
                 if key in ALLOWED_KEYS:
+                    if self.guard:
+                        self.guard()
                     self._require_focus()
                     self.pyautogui.press(key)
                     time.sleep(0.15)
         elif action["tool"] == "click":
+            if self.guard:
+                self.guard()
             self._require_focus()
             left, top, scale_x, scale_y = self.geometry
             x = int(left + action["input"]["x"] * scale_x)
@@ -459,6 +474,8 @@ class DemoGame:
         self.Image, self.ImageDraw = Image, ImageDraw
         self.step = 0
         self.window_size = None
+        self.guard = None
+        self.pressed = 0  # 시험용: 실제로 "누른" 키 수
 
     def capture(self):
         width, height = AI_IMAGE_SIZE
@@ -475,7 +492,11 @@ class DemoGame:
         return image
 
     def execute(self, action):
-        pass
+        """키를 누르지 않는다. 실제 게임과 같이 키마다 guard만 확인한다 (판 끝 멈춤 시험용)."""
+        for _ in (action or {}).get("input", {}).get("keys", [])[:3]:
+            if self.guard:
+                self.guard()
+            self.pressed += 1
 
 
 def demo_decision(step):
@@ -529,6 +550,12 @@ class Agent:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._thread = None
+        # 게임에서 시작한 판의 게임 상태 (⑥ 판 끝, ⑦ 살아 있음 신호)
+        self._watch_game = self.config.get("started_from") == "game"
+        self._heartbeat_at = 0.0
+        self._hero_alive = True
+        self.depth = None
+        self.end_reason = ""
         # 세 창 관찰 화면용 (기록·AI 입력에는 들어가지 않는다)
         self.phase = "ready"  # ready → capture → thinking → acting → (typing) … → done
         self.game = None
@@ -546,6 +573,49 @@ class Agent:
     def stop(self):
         self._typing_until = 0.0
         self._stop.set()
+
+    def end_game(self, reason, depth=None):
+        """판 끝(⑥ 또는 멈춤 장치): 바로 키 보내기를 멈추고 입력 잠금을 푼다. 처음 받은 이유만 남긴다."""
+        if not self.end_reason:
+            self.end_reason = reason
+        if depth is not None:
+            self.depth = depth
+        self.stop()
+        if self.input_lock is not None:  # AI 모델 응답을 기다리는 중이어도 잠금은 바로 푼다
+            self.input_lock.stop()
+
+    def heartbeat(self, alive, depth):
+        """⑦ 게임이 1초마다 보내는 살아 있음 신호."""
+        self._heartbeat_at = time.time()
+        self.depth = depth
+        if not alive:
+            self._hero_alive = False
+            self.end_game("died", depth)
+
+    def _guard(self):
+        """키·클릭 하나를 보내기 직전마다 부른다. 판이 끝났으면 StopRequested를 던져 아무것도 보내지 않는다.
+        게임에서 시작한 판은 살아 있음 신호도 확인한다: 오래됐으면 기다리고, 너무 오래되면 판을 끝낸다."""
+        deadline = None
+        while True:
+            if self._stop.is_set():
+                raise StopRequested()
+            if not self._watch_game:
+                return
+            if not self._hero_alive:
+                self.end_game("died")
+                raise StopRequested()
+            if time.time() - self._heartbeat_at <= HEARTBEAT_STALE:
+                return
+            game = self.game
+            if hasattr(game, "exists") and not game.exists():
+                self.end_game("game_closed")
+                raise StopRequested()
+            deadline = deadline or time.time() + HEARTBEAT_WAIT
+            if time.time() > deadline:
+                self.end_game("lost_game")
+                raise StopRequested()
+            self.phase = "waiting_game"
+            self._stop.wait(0.3)
 
     def add_hint(self, text):
         text = text.strip()
@@ -619,6 +689,7 @@ class Agent:
         try:
             game = DemoGame() if self.config["demo"] else WindowsGame()
             game.stop_event = self._stop
+            game.guard = self._guard
             self.game = game
             if self.config.get("started_from") == "game" and hasattr(game, "focus"):
                 game.focus()  # 게임에서 시작한 판: 던전 도착 뒤 게임 창을 맨 앞으로 (실패해도 키를 보내기 전에 다시 확인한다)
@@ -660,6 +731,9 @@ class Agent:
                     thought, action, usage = self._ask(client, system, image, hints, checkpoint)
 
                 self._record(step, image_name, thought, action, usage, hints, checkpoint)
+                if self._stop.is_set():  # 생각하는 동안 판이 끝났으면 행동하지 않는다
+                    final_status = "stopped"
+                    break
                 self.phase = "acting"
                 if not self.config["dry_run"]:
                     game.execute(action)
@@ -673,14 +747,28 @@ class Agent:
             if self.input_lock is not None:
                 self.input_lock.stop()
         self.phase = "done"
+        self._record_end(final_status, game)
 
         # 한 번이라도 판단했으면 다음 판을 위한 교훈을 쓴다.
         # 생각만 하기(dry-run)는 조작을 안 했는데 AI가 "눌렀더니 ~됐다"는 틀린 교훈을 써서 건너뛴다.
         if self.entries and not self.config["dry_run"]:
-            if game is not None and not self.config["demo"]:
+            # 게임 화면이 아닌 곳(타이틀, 꺼진 게임)은 찍지 않는다
+            if game is not None and not self.config["demo"] and self.end_reason not in ("quit", "game_closed", "lost_game"):
                 image = self._capture_final(game) or image
             self._finish_with_lessons(client, final_status, image)
         self.status = final_status
+
+    def _record_end(self, final_status, game):
+        """끝난 이유와 층을 config.json에 더한다. 이 항목이 없는 기록은 이 기능 전의 판이다."""
+        if not self.end_reason:
+            self.end_reason = {"finished": "max_steps", "error": "error"}.get(final_status, "stopped")
+        if self.end_reason == "quit" and hasattr(game, "exists"):  # 게임을 끄는 중에 온 quit인지 본다
+            time.sleep(1.0)
+            if not game.exists():
+                self.end_reason = "game_closed"
+        self.config.update(ended_reason=self.end_reason, ended_depth=self.depth,
+                           ended_at=datetime.now().isoformat(timespec="seconds"))
+        self._save_config()
 
     def _save_config(self):
         with open(os.path.join(self.run_dir, "config.json"), "w", encoding="utf-8") as f:
@@ -795,8 +883,11 @@ class Agent:
     # ----- 판이 끝난 뒤: 다음 판의 나에게 남기는 교훈 -----
     def _finish_with_lessons(self, client, final_status, image):
         self.lessons_state = "writing"
-        ending = {"finished": "정해진 판단 횟수를 다 씀", "stopped": "관찰자가 중지함"}.get(
-            final_status, f"오류로 멈춤 ({self.error})")
+        if self.end_reason not in ("max_steps", "stopped", "error", ""):  # 게임에서 시작한 판의 새 이유 (사망 등)
+            ending = END_REASONS[self.end_reason]
+        else:  # 지금까지와 같은 문구
+            ending = {"finished": "정해진 판단 횟수를 다 씀", "stopped": "관찰자가 중지함"}.get(
+                final_status, f"오류로 멈춤 ({self.error})")
         try:
             if self.config["demo"]:
                 time.sleep(1.0)

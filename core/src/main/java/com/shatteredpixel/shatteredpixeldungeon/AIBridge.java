@@ -56,13 +56,85 @@ public class AIBridge {
 	private static Scene arrivalScene;
 	private static float arrivalTime;
 
+	//⑦ 살아 있음 신호: AI 판이 GameScene에 있는 동안 1초마다. Python은 키를 보내기 직전마다 이 신호를 확인한다
+	private static final float HEARTBEAT_EVERY = 1f;
+	private static final int HEARTBEAT_FAILS = 3; //연달아 이만큼 실패하면 관찰기가 꺼진 것으로 보고 AI 판 표시를 지운다
+	private static float sinceHeartbeat;
+	private static boolean heartbeatInFlight;
+	private static boolean deathSent;
+	private static int heartbeatFails;
+
 	//GameScene.update()에서 매 프레임 불린다
 	public static void onGameUpdate(){
 		try {
 			if (pendingRunId != null) checkArrival();
+			if (activeRunId != null) heartbeat();
 		} catch (Exception e) {
 			Game.reportException(e);
 		}
+	}
+
+	//⑥ 사망: GameScene.gameOver()에서 불린다
+	public static void onGameOver(){
+		end("died");
+	}
+
+	//⑥ 승리·타이틀로 나가기·게임 종료: GameScene.destroy()에서 불린다
+	//층을 옮길 때는 InterlevelScene.mode를 NONE이 아닌 값으로 정한 뒤 장면을 바꾸므로 판 끝이 아니다
+	public static void onLeaveGame(){
+		if (InterlevelScene.mode != InterlevelScene.Mode.NONE) return;
+		pendingRunId = null;
+		end(Statistics.gameWon ? "won" : "quit");
+	}
+
+	private static void end(String reason){
+		if (activeRunId == null) return;
+		JsonValue body = object();
+		body.addChild("run_id", new JsonValue(activeRunId));
+		body.addChild("reason", new JsonValue(reason));
+		body.addChild("depth", new JsonValue(Dungeon.depth));
+		activeRunId = null; //판이 끝났으므로 신호도 멈춘다. 닿지 않아도 신호가 끊겨서 Python은 키를 보내지 않는다
+		post("/api/bridge/ended", body, SHORT_TIMEOUT, new Listener() {
+			@Override
+			public void onResult(JsonValue result) {
+				//결과와 관계없이 게임은 그대로 진행한다
+			}
+		});
+	}
+
+	private static void heartbeat(){
+		if (Dungeon.hero == null) return;
+		boolean alive = Dungeon.hero.isAlive();
+		sinceHeartbeat += Game.elapsed;
+		boolean justDied = !alive && !deathSent;
+		if (heartbeatInFlight || (sinceHeartbeat < HEARTBEAT_EVERY && !justDied)) return;
+		if (justDied) deathSent = true; //죽은 것을 처음 보면 1초를 기다리지 않고 바로 알린다
+
+		final String runId = activeRunId;
+		JsonValue body = object();
+		body.addChild("run_id", new JsonValue(runId));
+		body.addChild("alive", new JsonValue(alive));
+		body.addChild("depth", new JsonValue(Dungeon.depth));
+		sinceHeartbeat = 0;
+		heartbeatInFlight = true;
+		post("/api/bridge/heartbeat", body, SHORT_TIMEOUT, new Listener() {
+			@Override
+			public void onResult(JsonValue result) {
+				heartbeatInFlight = false;
+				if (!runId.equals(activeRunId)) return;
+				if (result == null) {
+					//관찰기가 꺼졌다. 게임은 그대로 두고 사람이 이어서 할 수 있게 한다
+					if (++heartbeatFails >= HEARTBEAT_FAILS) {
+						activeRunId = null;
+						GLog.w(Messages.get(GameScene.class, "ai_disconnected"));
+					}
+				} else {
+					heartbeatFails = 0;
+					//판이 이미 끝났다 (최대 판단, 중지, 관찰기 다시 켬)
+					if (!result.getBoolean("ok", false)) activeRunId = null;
+				}
+			}
+		});
 	}
 
 	//⑤ 던전 도착: [AI로 시작]한 판의 첫 GameScene에서, 주인공이 조작을 기다릴 때 한 번만 보낸다
@@ -91,6 +163,9 @@ public class AIBridge {
 			public void onResult(JsonValue result) {
 				if (result != null && result.getBoolean("ok", false)) {
 					activeRunId = runId;
+					sinceHeartbeat = HEARTBEAT_EVERY; //첫 신호를 바로 보낸다
+					deathSent = false;
+					heartbeatFails = 0;
 				} else {
 					notStarted();
 				}

@@ -188,8 +188,14 @@ $("hintform").addEventListener("submit", async (event) => {
 });
 
 // ----- 화면 갱신 -----
+const END_LABEL = { died: "사망으로 끝남", won: "승리", quit: "타이틀로 나가서 끝남", game_closed: "게임이 꺼져서 끝남",
+  lost_game: "게임 신호가 끊겨서 끝남", max_steps: "최대 판단 도달", stopped: "중지됨", error: "멈춤" };
 function light(s) {
-  if (s.status !== "running") return ["red", s.status === "finished" ? "끝남" : s.status === "stopped" ? "중지됨" : "멈춤"];
+  if (s.status !== "running") {
+    const reason = s.config.ended_reason;
+    return ["red", reason ? END_LABEL[reason] || reason : s.status === "finished" ? "끝남" : s.status === "stopped" ? "중지됨" : "멈춤"];
+  }
+  if (s.phase === "waiting_game") return ["yellow", "게임 신호를 기다리는 중 (층 이동 등)"];
   if (s.focus_waiting) return ["yellow", "게임 창을 기다리는 중"];
   if (s.typing) return ["yellow", "힌트 입력 중이라 기다리는 중"];
   if (s.phase === "thinking" || s.phase === "capture") return ["yellow", "AI가 생각하는 중"];

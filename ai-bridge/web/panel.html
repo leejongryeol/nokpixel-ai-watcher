@@ -42,6 +42,10 @@
   .settings .summary { font-size: 13.5px; font-weight: 700; }
   .settings .pill { font-weight: 500; font-size: 12.5px; }
   .pill.wait { color: var(--amber); border-color: var(--amber); }
+  .limit { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0; padding: 8px 12px; border-radius: 10px;
+    background: rgba(242, 194, 122, 0.14); border: 1px solid var(--amber); color: var(--amber); font-size: 14px; font-weight: 700; }
+  .limit .grow { flex: 1; }
+  .limit .btn { height: 32px; padding: 0 12px; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -58,6 +62,12 @@
     <span>게임 창</span><span id="light" class="light">—</span>
   </div>
   <p id="note" class="notice error hidden" style="margin: 0; padding: 6px 10px; font-size: 13px"></p>
+  <div id="limit" class="limit hidden" role="status">
+    <span id="limit-text">⏹ 한도 도달</span><span class="grow"></span>
+    <button class="btn" type="button" data-add="10">+10 판단</button>
+    <button class="btn" type="button" data-add="30">+30 판단</button>
+    <button id="finish" class="btn" type="button">여기서 끝내기</button>
+  </div>
 
   <dl class="goals panel" style="margin: 0">
     <dt>최종 목표</dt><dd id="final-goal">지하 5층 보스 "구(Goo)" 처치</dd>
@@ -150,6 +160,14 @@ $("layout").addEventListener("click", async () => {
     $("msg").textContent = [missing.length ? `못 찾은 창: ${missing.join(", ")}` : "두 창을 배치했어요.", r.warning].filter(Boolean).join(" · ");
   } catch (e) { showError(e.message); }
 });
+// 한도 도달: 입력 잠금은 그대로, AI는 쉬는 중. 늘리면 다음 판단 번호부터 이어 가고, 끝내면 교훈을 쓴다
+document.querySelectorAll("#limit [data-add]").forEach((b) => b.addEventListener("click", () =>
+  api("/api/extend", { method: "POST", body: { add: Number(b.dataset.add) } })
+    .then((r) => { if (r.error) showError(r.error); }).catch((e) => showError(e.message))));
+$("finish").addEventListener("click", () => {
+  if (!confirm("여기서 판을 끝낼까요? 끝낸 판은 이어 갈 수 없어요.")) return;
+  api("/api/finish", { method: "POST" }).then((r) => { if (r.error) showError(r.error); }).catch((e) => showError(e.message));
+});
 $("focus").addEventListener("click", () =>
   api("/api/focus", { method: "POST" }).then(() => { $("msg").textContent = "게임 창을 앞으로 가져왔어요."; })
     .catch((e) => showError(e.message)));
@@ -192,6 +210,7 @@ function light(s) {
     return ["red", reason ? END_LABEL[reason] || reason : s.status === "finished" ? "끝남" : s.status === "stopped" ? "중지됨" : "멈춤"];
   }
   if (s.paused) return ["yellow", "일시정지 · 사람이 조작할 수 있어요"];
+  if (s.phase === "limit") return ["yellow", "한도 도달 · 늘리거나 끝내 주세요"];
   if (s.phase === "waiting_game") return ["yellow", "게임 신호를 기다리는 중 (층 이동 등)"];
   if (s.focus_waiting) return ["yellow", "게임 창을 기다리는 중"];
   if (s.typing) return ["yellow", "힌트 입력 중이라 기다리는 중"];
@@ -218,6 +237,13 @@ function renderNow(s) {
   else { lock.className = "pill"; lock.textContent = "🔓 잠금 없음"; }
   $("step").textContent = s.step || "—";
   $("steps-max").textContent = c.steps;
+  // 한도 도달 띠: 일시정지 중(한도에서 멈춘 경우)에도 보이되 버튼은 재개 뒤에 누른다
+  const atLimit = s.status === "running" && (s.phase === "limit" || (s.paused && s.step >= c.steps && s.entry_count >= c.steps));
+  $("limit").classList.toggle("hidden", !atLimit);
+  $("limit-text").textContent = `⏹ 한도 도달 · ${s.step}/${c.steps}` + (s.paused ? " · 재개한 뒤 고를 수 있어요" : "");
+  document.querySelectorAll("#limit button").forEach((b) => {
+    b.disabled = s.phase !== "limit" || (b.dataset.add && c.steps >= 500);
+  });
   $("cost").textContent = money(s.total_cost);
   const [color, text] = light(s);
   $("light").className = "light " + color;

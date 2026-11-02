@@ -54,6 +54,7 @@ TYPING_WAIT_SECONDS = 60  # 관찰자가 힌트를 입력하는 동안 다음 �
 # 게임에서 시작한 판: 게임이 1초마다 보내는 살아 있음 신호(⑦)를 키마다 확인한다 (bridge.md 9장 A-5-4)
 HEARTBEAT_STALE = 3  # 신호가 이 시간(초)보다 오래되면 키를 보내지 않고 기다린다 (층 이동 로딩 등)
 HEARTBEAT_WAIT = 30  # 그래도 신호가 안 오면 이 시간(초) 뒤 판을 끝낸다 (lost_game)
+STEPS_LIMIT = 500  # 판단 추가로 늘릴 수 있는 최대 판단 합계 (web.py의 최대 판단 입력과 같음)
 # 판이 끝난 이유 (config.json의 ended_reason)
 END_REASONS = {"died": "캐릭터가 죽음", "won": "승리", "quit": "게임 메뉴에서 타이틀로 나감",
                "game_closed": "게임이 꺼짐", "lost_game": "게임 신호가 끊김",
@@ -562,6 +563,7 @@ class Agent:
         self._stop = threading.Event()
         self._paused = threading.Event()
         self._pause = None  # 지금 일시정지 기록 {"step", "from", "discarded_cost_usd"}
+        self._limit_choice = None  # 한도 도달에서 고른 것: ("extend", 새 합계) 또는 ("finish",)
         self._lock = threading.Lock()
         self._thread = None
         # 게임에서 시작한 판의 게임 상태 (⑥ 판 끝, ⑦ 살아 있음 신호)
@@ -571,7 +573,7 @@ class Agent:
         self.depth = None
         self.end_reason = ""
         # 세 창 관찰 화면용 (기록·AI 입력에는 들어가지 않는다)
-        self.phase = "ready"  # ready → capture → thinking → acting → (typing) … → done
+        self.phase = "ready"  # ready → capture → thinking → acting → (typing) … → (limit) → done
         self.game = None
         self._typing_until = 0.0
         self.input_lock = None
@@ -607,6 +609,25 @@ class Agent:
             return False
         self._paused.clear()
         return True
+
+    def extend(self, add):
+        """한도 도달에서 판단을 더한다 (합계 STEPS_LIMIT까지). 늘린 뒤 합계, 못 늘리면 None."""
+        with self._lock:
+            if self.phase != "limit" or self._limit_choice or self._paused.is_set() or self._stop.is_set():
+                return None
+            to = min(self.config["steps"] + add, STEPS_LIMIT)
+            if to <= self.config["steps"]:
+                return None
+            self._limit_choice = ("extend", to)
+            return to
+
+    def finish(self):
+        """한도 도달에서 [여기서 끝내기]: 최대 판단으로 끝난 판(max_steps)이 된다."""
+        with self._lock:
+            if self.phase != "limit" or self._limit_choice or self._paused.is_set() or self._stop.is_set():
+                return False
+            self._limit_choice = ("finish",)
+            return True
 
     def end_game(self, reason, depth=None):
         """판 끝(⑥ 또는 멈춤 장치): 바로 키 보내기를 멈추고 입력 잠금을 푼다. 처음 받은 이유만 남긴다."""
@@ -777,7 +798,15 @@ class Agent:
             system = self.system_prompt()
 
             step = 1
-            while step <= self.config["steps"]:
+            while True:
+                if step > self.config["steps"]:
+                    # 최대 판단까지 했다. 게임에서 시작한 판은 한도 도달에서 사람이 늘리거나 끝낸다
+                    choice = self._wait_at_limit(game) if self._watch_game else "finish"
+                    if choice == "extend":
+                        continue
+                    if choice == "stopped":
+                        final_status = "stopped"
+                    break
                 self._wait_while_typing()
                 self._wait_while_paused(game)
                 if self._stop.is_set():
@@ -864,6 +893,42 @@ class Agent:
         self.config.update(display=display, game_window=list(size) if size else None, ai_image=list(AI_IMAGE_SIZE))
         self._save_config()
 
+    def _wait_at_limit(self, game):
+        """한도 도달: 입력 잠금은 그대로 두고 키를 보내지 않으며 판단도 하지 않는다 (비용 없음).
+        일시정지는 여기서도 쓸 수 있고, 재개하면 다시 한도 도달로 돌아온다.
+        늘리면 "extend", 끝내기는 "finish", 중지·판 끝이면 "stopped"."""
+        while True:
+            self._wait_while_paused(game)
+            if self._stop.is_set():
+                return "stopped"
+            with self._lock:
+                choice, self._limit_choice = self._limit_choice, None
+                if choice is None:
+                    self.phase = "limit"
+            if choice and choice[0] == "extend":
+                self.config.setdefault("extensions", []).append({
+                    "at": datetime.now().isoformat(timespec="seconds"), "added": choice[1] - self.config["steps"],
+                    "from": self.config["steps"], "to": choice[1]})
+                self.config["steps"] = choice[1]
+                self._save_config()
+                if self.input_lock is not None and not self.input_lock.locking:  # F12로 풀었으면 다시 잠근다
+                    self.input_lock.start(game.hwnd)
+                return "extend"
+            if choice:
+                return "finish"
+            self._check_game_waiting(game)
+            self._stop.wait(0.5)
+
+    def _check_game_waiting(self, game):
+        """한도 도달·일시정지로 기다리는 동안에도 게임이 살아 있는지 본다 (키를 보내지 않으니 _guard가 불리지 않음).
+        살아 있음 신호가 HEARTBEAT_STALE + HEARTBEAT_WAIT초 넘게 없으면 판을 끝낸다."""
+        if not self._watch_game or self._stop.is_set():
+            return
+        if not self._hero_alive:
+            self.end_game("died")
+        elif time.time() - self._heartbeat_at > HEARTBEAT_STALE + HEARTBEAT_WAIT:
+            self.end_game("game_closed" if hasattr(game, "exists") and not game.exists() else "lost_game")
+
     def _wait_while_paused(self, game):
         """일시정지 동안 기다린다. 재개하면 게임 창을 앞으로 가져오고 입력 잠금을 다시 건다.
         멈춘 시간은 config.json의 pauses에 남긴다 (그동안 사람이 조작했을 수 있으므로)."""
@@ -871,6 +936,7 @@ class Agent:
             return
         while self._paused.is_set() and not self._stop.is_set():
             self.phase = "paused"
+            self._check_game_waiting(game)
             time.sleep(0.2)
         pause, self._pause = self._pause, None
         if pause:

@@ -447,6 +447,35 @@ def pause():
     return jsonify({"ok": True})
 
 
+@app.post("/api/extend")
+@bridge_only
+def extend():
+    """한도 도달에서 판단 더하기 (+10 또는 +30). 다음 판단 번호부터 이어 간다. 합계는 500까지."""
+    a = current()
+    try:
+        add = int(body().get("add", 0))
+    except (TypeError, ValueError):
+        add = 0
+    if add not in (10, 30):
+        return jsonify({"error": "10 또는 30만 더할 수 있어요."}), 400
+    if not a or a.phase != "limit":
+        return jsonify({"error": "한도 도달 상태가 아니에요."}), 409
+    to = a.extend(add)
+    if to is None:
+        return jsonify({"error": "더 늘릴 수 없어요 (최대 500판단)."}), 409
+    return jsonify({"ok": True, "steps": to})
+
+
+@app.post("/api/finish")
+@bridge_only
+def finish():
+    """한도 도달에서 [여기서 끝내기]. 최대 판단으로 끝난 판이 되고, 교훈을 쓴다."""
+    a = current()
+    if not a or not a.finish():
+        return jsonify({"error": "한도 도달 상태가 아니에요."}), 409
+    return jsonify({"ok": True})
+
+
 # ---------------- 리포트 ----------------
 @app.get("/api/runs")
 def runs():

@@ -174,7 +174,9 @@ function show(data) {
   $("result-sub").textContent = `${(c.started_at || "").replace("T", " ")} 시작 · ` + (c.ended_reason  // 게임에서 시작한 판부터 기록됨
     ? `끝난 이유: ${END_LABEL[c.ended_reason] || c.ended_reason}` + (c.ended_depth ? ` · ${c.ended_depth}층` : "")
     : "보스 처치·도달 층은 게임 코드 연결 후 기록돼요")
-    + (c.final_goal ? ` · 최종 목표: ${c.final_goal}` : "");  // 기본 목표가 아닌 판만
+    + (c.final_goal ? ` · 최종 목표: ${c.final_goal}` : "")  // 기본 목표가 아닌 판만
+    + ((c.extensions || []).length  // 한도 도달에서 늘린 판만. 처음 최대 판단은 extensions[0].from
+      ? ` · 판단 추가: ${c.extensions.map((x) => `+${x.added} (${(x.at || "").slice(11, 16)})`).join(" · ")}` : "");
   $("t-steps").replaceChildren(String(es.length), el("small", { text: "회" }));
   $("t-tokens").textContent = number(tokens);
   $("t-cost").textContent = money(cost);

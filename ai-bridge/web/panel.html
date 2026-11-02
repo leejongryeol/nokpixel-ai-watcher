@@ -132,7 +132,7 @@ function summaryText(c) {
   const parts = [c.model_name, c.guide ? "공략 제공" : "공략 없이", c.demo ? "데모" : c.dry_run ? "생각만" : "실제 조작", `${c.steps}판단`];
   if (c.hero_class) parts.push(HERO[c.hero_class] || c.hero_class);
   if (c.started_from === "game") parts.push(c.challenges ? `제약 ${(c.challenge_names || []).length}개` : "제약 없음");
-  parts.push("시드 " + (c.custom_seed || c.seed || "무작위"));
+  parts.push("시드 " + (c.seed_code || c.custom_seed || c.seed || "무작위"));  // seed_code: 던전 도착 뒤 실제 시드
   if (c.lessons_from) parts.push("교훈 " + c.lessons_from);
   return parts.join(" · ");
 }

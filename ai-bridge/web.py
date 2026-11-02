@@ -295,6 +295,28 @@ def bridge_run():
     return jsonify({"ok": True, "run_id": new.run_id})
 
 
+@app.post("/api/bridge/arrived")
+@bridge_only
+def bridge_arrived():
+    """⑤ 던전 도착: 대기 중 판과 run_id가 같을 때만 받아서 AI를 시작한다. 실제 시드는 config.json에만 더한다."""
+    data = body()
+    with run_lock:
+        p = state["pending"]
+        if not p or data.get("run_id") != p.run_id:
+            return jsonify({"ok": False, "reason": "not_pending"}), 409
+        a = current()
+        if a and a.status == "running":
+            return jsonify({"ok": False, "reason": "running"}), 409
+        try:
+            depth = int(data.get("depth") or 0)
+        except (TypeError, ValueError):
+            depth = 0
+        p.arrived(re.sub(r"[^A-Za-z0-9-]", "", str(data.get("seed_code") or ""))[:20], depth)
+        state["agent"], state["pending"] = p, None
+        p.start()
+    return jsonify({"ok": True})
+
+
 def discard_pending_dir(old, keep):
     """바뀐 대기 판의 폴더는 config.json만 있으면 지운다 (판단 기록이 있는 폴더는 지우지 않는다)."""
     if not old or os.path.normcase(old.run_dir) == os.path.normcase(keep):

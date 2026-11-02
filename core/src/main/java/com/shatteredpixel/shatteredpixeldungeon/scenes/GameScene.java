@@ -21,6 +21,7 @@
 
 package com.shatteredpixel.shatteredpixeldungeon.scenes;
 
+import com.shatteredpixel.shatteredpixeldungeon.AIBridge;
 import com.shatteredpixel.shatteredpixeldungeon.Assets;
 import com.shatteredpixel.shatteredpixeldungeon.Badges;
 import com.shatteredpixel.shatteredpixeldungeon.Challenges;
@@ -884,6 +885,7 @@ public class GameScene extends PixelScene {
 		}
 
 		super.update();
+		AIBridge.onGameUpdate(); //[nokpixel-ai-watcher] AI 판의 던전 도착 알림 (docs/project/bridge.md)
 
 		if (notifyDelay > 0) notifyDelay -= Game.elapsed;
 

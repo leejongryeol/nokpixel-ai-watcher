@@ -26,7 +26,13 @@ import com.badlogic.gdx.Net;
 import com.badlogic.gdx.utils.JsonReader;
 import com.badlogic.gdx.utils.JsonValue;
 import com.badlogic.gdx.utils.JsonWriter;
+import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
+import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
+import com.shatteredpixel.shatteredpixeldungeon.scenes.InterlevelScene;
+import com.shatteredpixel.shatteredpixeldungeon.utils.DungeonSeed;
+import com.shatteredpixel.shatteredpixeldungeon.utils.GLog;
 import com.watabou.noosa.Game;
+import com.watabou.noosa.Scene;
 import com.watabou.utils.Callback;
 
 import java.io.File;
@@ -39,6 +45,62 @@ public class AIBridge {
 	public static final String HOST = "http://127.0.0.1:8765";
 	public static final int SHORT_TIMEOUT = 3000; //상태 조회·키 보내기·판 준비 (ms)
 	public static final int TEST_TIMEOUT = 35000; //연결 시험: Python이 최대 30초 + 여유
+
+	//AI 판 표시 (bridge.md 9장 A-5-4)
+	//pendingRunId: AI 설정 장면의 [AI로 시작]이 판 준비(④)에 성공했을 때만 켠다. 그 뒤 첫 던전 도착에서 한 번 쓰고 지운다
+	//activeRunId: 던전 도착(⑤)이 성공해서 AI가 플레이하는 판
+	public static String pendingRunId = null;
+	public static String activeRunId = null;
+
+	private static final float ARRIVE_DELAY = 1.2f; //화면이 밝아지는 효과(1초)가 끝난 뒤에 알린다
+	private static Scene arrivalScene;
+	private static float arrivalTime;
+
+	//GameScene.update()에서 매 프레임 불린다
+	public static void onGameUpdate(){
+		try {
+			if (pendingRunId != null) checkArrival();
+		} catch (Exception e) {
+			Game.reportException(e);
+		}
+	}
+
+	//⑤ 던전 도착: [AI로 시작]한 판의 첫 GameScene에서, 주인공이 조작을 기다릴 때 한 번만 보낸다
+	private static void checkArrival(){
+		Scene scene = Game.scene();
+		if (scene != arrivalScene){
+			arrivalScene = scene;
+			arrivalTime = 0;
+		}
+		arrivalTime += Game.elapsed;
+		if (arrivalTime < ARRIVE_DELAY || Dungeon.hero == null || !Dungeon.hero.ready
+				|| InterlevelScene.mode != InterlevelScene.Mode.NONE) return;
+
+		final String runId = pendingRunId;
+		pendingRunId = null; //층을 옮겨 GameScene이 다시 만들어져도 다시 보내지 않는다
+		if (Dungeon.depth != 1){
+			notStarted();
+			return;
+		}
+		JsonValue body = object();
+		body.addChild("run_id", new JsonValue(runId));
+		body.addChild("depth", new JsonValue(Dungeon.depth));
+		body.addChild("seed_code", new JsonValue(DungeonSeed.convertToCode(Dungeon.seed)));
+		post("/api/bridge/arrived", body, SHORT_TIMEOUT, new Listener() {
+			@Override
+			public void onResult(JsonValue result) {
+				if (result != null && result.getBoolean("ok", false)) {
+					activeRunId = runId;
+				} else {
+					notStarted();
+				}
+			}
+		});
+	}
+
+	private static void notStarted(){
+		GLog.w(Messages.get(GameScene.class, "ai_not_started"));
+	}
 
 	public interface Listener {
 		//렌더 스레드에서 불린다. 응답이 JSON 객체가 아니면 body는 null

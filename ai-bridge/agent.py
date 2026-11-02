@@ -599,6 +599,10 @@ class Agent:
                 "entries": entries,
             }
 
+    def arrived(self, seed_code, depth):
+        """게임이 던전에 도착했다고 알림(⑤). 실제 시드와 도착 층은 기록에만 남기고 AI 입력에는 넣지 않는다."""
+        self.config.update(seed_code=seed_code, arrival_depth=depth)
+
     def prepare(self):
         """시작하기 전에 기록 폴더와 config.json만 만든다 (게임의 AI 설정에서 판을 준비할 때)."""
         os.makedirs(self.run_dir, exist_ok=True)
@@ -616,6 +620,8 @@ class Agent:
             game = DemoGame() if self.config["demo"] else WindowsGame()
             game.stop_event = self._stop
             self.game = game
+            if self.config.get("started_from") == "game" and hasattr(game, "focus"):
+                game.focus()  # 게임에서 시작한 판: 던전 도착 뒤 게임 창을 맨 앞으로 (실패해도 키를 보내기 전에 다시 확인한다)
             if self.input_lock is not None:  # 실패해도 판은 진행한다 (관찰 화면에 🔓와 이유가 보임)
                 self.input_lock.start(game.hwnd)
             if not self.config["demo"]:

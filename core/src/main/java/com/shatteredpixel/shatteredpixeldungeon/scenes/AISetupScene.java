@@ -207,6 +207,7 @@ public class AISetupScene extends PixelScene {
 		StyledButton btnStart = button(Messages.get(this, "start_without_ai"), new Runnable() {
 			@Override
 			public void run() {
+				AIBridge.pendingRunId = null; //AI 없이 시작한 판에서는 던전 도착 알림을 보내지 않는다
 				startGame();
 			}
 		});
@@ -402,6 +403,8 @@ public class AISetupScene extends PixelScene {
 				starting = false;
 				if (destroyed) return;
 				if (result != null && result.getBoolean("ok", false)) {
+					//이 판의 첫 던전 도착에서 Python에 알리고(⑤) AI가 시작한다
+					AIBridge.pendingRunId = result.getString("run_id", null);
 					startGame();
 					return;
 				}
@@ -469,7 +472,8 @@ public class AISetupScene extends PixelScene {
 
 	private boolean canStartAI() {
 		JsonValue key = key();
-		return connected() && !status.getBoolean("running", false) && key != null
+		//첫 판 튜토리얼은 화면과 던전이 달라서 AI로 시작하지 않는다 (bridge.md 9장 A-5-4)
+		return !SPDSettings.intro() && connected() && !status.getBoolean("running", false) && key != null
 				&& key.getBoolean("tested_ok", false) && !testing && !starting;
 	}
 
@@ -563,6 +567,7 @@ public class AISetupScene extends PixelScene {
 				default: return Messages.get(this, "test_other");
 			}
 		}
+		if (SPDSettings.intro()) return Messages.get(this, "tutorial_first");
 		if (key.getBoolean("tested_ok", false)) return Messages.get(this, "ready");
 		return Messages.get(this, "need_test");
 	}

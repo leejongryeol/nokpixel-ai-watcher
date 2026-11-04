@@ -107,6 +107,72 @@ function fillEntryDetail(e, config, runId) {
     e.memo_add ? el("div", { style: "color: var(--teal)" }, el("b", { text: `📝 메모 추가 ${e.memo_add_id || ""} ` }), e.memo_add) : "",
     e.memo_removed ? el("div", { style: "color: var(--teal)" }, el("b", { text: "🗑️ 메모 지움 " }), el("s", { text: e.memo_removed })) : "",
     e.hints && e.hints.length ? el("div", { style: "color: var(--purple)" }, el("b", { text: "💡 받은 힌트 " }), e.hints.join(" / ")) : "");
+  fillStateDetail(e, runId);
+}
+
+// 그 판단 때의 게임 데이터 (A-6-2, docs/project/game-state.md). 게임에서 시작한 판의 state_seq가 있을 때만.
+// 페이지에 d-state 요소가 있어야 한다. 이정표용 record 칸은 서버가 돌려주지 않는다
+const stateCache = {};
+const HUNGER_TEXT = { none: "없음", hungry: "배고픔", starving: "굶주림" };
+const REASON_TEXT = { start: "판 시작", done: "행동 끝", level_changed: "층 이동", interrupted_enemy: "새 적이 보임",
+  damaged: "피해", damaged_heavy: "큰 피해", interrupted: "이동이 끊김", window: "창이 뜸" };
+const LOG_ICON = { good: "🟢", bad: "🔴", warning: "🟡", highlight: "🔵", normal: "·" };
+
+async function fillStateDetail(e, runId) {
+  const box = document.getElementById("d-state");
+  if (!box) return;
+  if (e.state_seq === undefined || e.state_seq === null) { box.replaceChildren(); box.dataset.key = ""; return; }
+  const key = runId + "/" + e.state_seq;
+  const wasOpen = !!box.querySelector("details[open]");
+  box.dataset.key = key;
+  if (!(key in stateCache)) {
+    try { stateCache[key] = await api(`/api/run/${encodeURIComponent(runId)}/state/${e.state_seq}`); }
+    catch (err) { return box.dataset.key === key && box.replaceChildren(el("div", { class: "muted", style: "font-size: 12.5px", text: `🗺️ 게임 데이터 #${e.state_seq}를 읽지 못했어요` })); }
+  }
+  if (box.dataset.key !== key) return;  // 기다리는 동안 다른 판단을 골랐다
+  box.replaceChildren(stateFold(stateCache[key], wasOpen));
+}
+
+function cellText(p) { return p ? `(${p[0]},${p[1]})` : "?"; }
+
+// 문자 지도 + 위쪽 x 눈금(5칸마다) + 왼쪽 y 숫자
+function mapText(map) {
+  if (!map || !map.rows || !map.rows.length) return "(본 칸 없음)";
+  const [ox, oy] = map.origin, w = map.width;
+  const pad = String(oy + map.rows.length - 1).length + 1;
+  const ruler = Array(w).fill(" ");
+  for (let i = 0; i < w; i++) {
+    const x = ox + i;
+    if (x % 5 === 0) String(x).split("").forEach((ch, k) => { if (i + k < w) ruler[i + k] = ch; });
+  }
+  return [" ".repeat(pad) + ruler.join("").trimEnd(),
+    ...map.rows.map((row, j) => String(oy + j).padStart(pad - 1) + " " + row)].join("\n");
+}
+
+function stateFold(s, open) {
+  const a = s.ai || {}, h = a.hero || {}, bag = a.bag || {};
+  const reasons = (s.reasons || []).map((r) => REASON_TEXT[r] || r).join(", ");
+  const eq = bag.equipped || {};
+  const eqNames = ["weapon", "armor", "artifact", "misc", "ring"].map((k) => eq[k]).filter(Boolean)
+    .map((it) => it.name + (it.cursed ? " (저주)" : ""));
+  const line = (label, items) => el("div", {}, el("b", { text: label + " " }), items.length ? items.join(" · ") : "없음");
+  const fold = el("details", { class: "statefold" },
+    el("summary", {}, `🗺️ 그때 게임 데이터 #${s.seq}`, reasons ? el("span", { class: "muted", text: " · " + reasons }) : null),
+    el("div", { class: "statebody" },
+      el("div", {}, `${h.depth}층 · 체력 ${h.hp}/${h.ht} · 레벨 ${h.lvl} (경험치 ${h.exp}/${h.exp_next}) · 힘 ${h.str} · 금화 ${h.gold}`
+        + ` · 배고픔 ${HUNGER_TEXT[h.hunger] || h.hunger} · 상태이상 ${(h.buffs || []).join(", ") || "없음"} · 위치 ${cellText(h.pos)} 발밑 ${h.standing_on || "?"}`),
+      el("pre", { class: "statemap", text: mapText(a.map) }),
+      el("div", { class: "muted", style: "font-size: 11.5px", text: "@ 나 · 1~9 적 · # 벽 · . 바닥 · + 닫힌 문 · ' 열린 문 · L 잠긴 문 · < 올라가는 계단 · > 내려가는 계단 · ~ 물 · , 풀 · \" 높은 풀 · : 낭떠러지 · ^ 함정 · T 막힌 것 · 0 우물 · * 아이템 · 빈칸 = 모름" }),
+      line("보이는 적", (a.mobs || []).map((m) => `${m.mark} ${m.name} ${cellText(m.pos)}${m.side !== "enemy" ? " [" + (m.side === "ally" ? "아군" : "중립") + "]" : ""}${m.asleep ? " 잠듦" : ""} 체력 ${m.hp}`)),
+      line("아이템", (a.heaps || []).map((x) => `${x.name} ${cellText(x.pos)}${x.visible_now ? "" : " (기억)"}`)),
+      line("계단", (a.transitions || []).map((t) => `${t.kind === "up" ? "올라가는" : "내려가는"} ${t.name} ${cellText(t.pos)}`)),
+      (a.traps || []).length ? line("함정", a.traps.map((t) => `${t.name} ${cellText(t.pos)}`)) : null,
+      (a.plants || []).length ? line("식물", a.plants.map((p) => `${p.name} ${cellText(p.pos)}`)) : null,
+      line("장착", eqNames),
+      line("가방", (bag.items || []).map((it) => `${it.id} ${it.name}${it.cursed ? " (저주)" : ""}`)),
+      (a.log || []).length ? el("div", {}, el("b", { text: "메시지" }), ...a.log.map((m) => el("div", { text: `${LOG_ICON[m.kind] || "·"} ${m.text}` }))) : null));
+  fold.open = !!open;
+  return fold;
 }
 
 // AI가 받은 사진 크기. config.json에 ai_image가 없으면 이전 방식(가로 720x400 창을 그대로)

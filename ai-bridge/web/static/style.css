@@ -71,6 +71,10 @@ h2.section { margin: 0; font-size: 18px; font-weight: 700; }
 .checkfold .basis { white-space: nowrap; }
 .checkfold.guess .basis { color: var(--red); font-weight: 700; }
 .checkfold .checkbody { padding: 4px 0 0 16px; }
+.statefold { font-size: 12.5px; color: var(--text-soft); line-height: 1.5; }
+.statefold summary { cursor: pointer; color: var(--muted); }
+.statefold .statebody { padding: 6px 0 0 16px; display: flex; flex-direction: column; gap: 4px; }
+.statemap { margin: 0; padding: 8px; overflow: auto; background: var(--panel-deep); border: 1px solid var(--line); border-radius: 6px; font-family: var(--font-mono); font-size: 12px; line-height: 1.2; color: #e2dac8; }
 .lessons { margin: 0; white-space: pre-wrap; font-family: var(--font-mono); font-size: 13px; line-height: 1.6; color: #e2dac8; }
 .tag.hint { background: var(--purple-bg); color: var(--purple); border: 1px dashed #8d77b8; }
 

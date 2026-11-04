@@ -45,6 +45,8 @@ NOT_EXECUTED_MARK = " (실제로 실행 안 됨)"  # 생각만 하기 판에서 
 LESSONS_FILE = "lessons.md"  # 판이 끝나고 AI가 쓴 교훈
 INHERITED_FILE = "inherited_lessons.md"  # 판을 시작할 때 이어받은 교훈 (기록용 사본)
 FINAL_IMAGE = "final.png"  # 판이 끝난 뒤 화면 (마지막 행동의 결과, 교훈 쓰기에 사용)
+STATES_DIR = "states"  # 게임이 보낸 상태(⑧)를 seq마다 저장 (docs/project/game-state.md). AI 입력에는 넣지 않는다 (A-6-2)
+STATE_MAX_BYTES = 1_000_000  # ⑧ 상태 하나의 최대 크기
 BASIS_VALUES = ["화면", "기록", "추측"]
 WAIT_AFTER_ACTION = 0.6  # 행동 후 화면이 바뀔 때까지 기다리는 시간(초)
 FOCUS_RETRIES = 3  # 게임 창을 맨 앞으로 가져오기 시도 횟수 (입력 전 확인)
@@ -572,6 +574,8 @@ class Agent:
         self._hero_alive = True
         self.depth = None
         self.end_reason = ""
+        # 게임 데이터(⑧ 상태). 기록에만 쓰고 AI 입력에는 넣지 않는다
+        self.last_state_seq = None
         # 세 창 관찰 화면용 (기록·AI 입력에는 들어가지 않는다)
         self.phase = "ready"  # ready → capture → thinking → acting → (typing) … → (limit) → done
         self.game = None
@@ -732,6 +736,19 @@ class Agent:
                 "entries": entries,
             }
 
+    def receive_state(self, data):
+        """⑧ 게임이 보낸 상태: states/<seq>.json에 저장한다. 잘못된 상태면 False."""
+        seq = data.get("seq")
+        if not isinstance(seq, int) or isinstance(seq, bool) or seq <= 0 \
+                or not isinstance(data.get("ai"), dict) or not isinstance(data.get("record"), dict):
+            return False
+        with self._lock:
+            os.makedirs(os.path.join(self.run_dir, STATES_DIR), exist_ok=True)
+            with open(os.path.join(self.run_dir, STATES_DIR, f"{seq:05d}.json"), "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            self.last_state_seq = seq
+        return True
+
     def arrived(self, seed_code, depth):
         """게임이 던전에 도착했다고 알림(⑤). 실제 시드와 도착 층은 기록에만 남기고 AI 입력에는 넣지 않는다."""
         self.config.update(seed_code=seed_code, arrival_depth=depth)
@@ -814,6 +831,7 @@ class Agent:
                     break
                 self.step = step
                 self.phase = "capture"
+                state_seq = self.last_state_seq  # 화면을 찍기 직전에 받은 게임 상태 (기록에만 남김)
                 image = game.capture()
                 if step == 1:  # 실제로 찍은 게임 창 크기를 기록에 남긴다
                     self._record_display(game)
@@ -834,7 +852,7 @@ class Agent:
                     # 생각하는 동안 일시정지: 사람이 조작해 화면이 바뀌므로 이 판단은 버리고, 재개 뒤 같은 번호로 다시 생각한다
                     self._discard(usage, hints)
                     continue
-                self._record(step, image_name, thought, action, usage, hints, checkpoint)
+                self._record(step, image_name, thought, action, usage, hints, checkpoint, state_seq)
                 if self._stop.is_set():  # 생각하는 동안 판이 끝났으면 행동하지 않는다
                     final_status = "stopped"
                     break
@@ -977,7 +995,7 @@ class Agent:
         except Exception:
             return None
 
-    def _record(self, step, image_name, thought, action, usage, hints, checkpoint):
+    def _record(self, step, image_name, thought, action, usage, hints, checkpoint, state_seq=None):
         price_in, price_out = MODELS[self.config["model"]]["price"]
         cost = (usage["input_tokens"] * price_in + usage["output_tokens"] * price_out) / 1_000_000
         inp = action["input"] if action else {}
@@ -1016,6 +1034,8 @@ class Agent:
                 "output_tokens": usage["output_tokens"],
                 "cost_usd": round(cost, 6),
             }
+            if self._watch_game:  # 게임에서 시작한 판만: 그 판단 직전의 게임 상태 번호 (mvp.py 판의 줄 모양은 그대로)
+                entry["state_seq"] = state_seq
             self.entries.append(entry)
             self.total_cost += cost
             self.total_tokens += usage["input_tokens"] + usage["output_tokens"]

@@ -14,6 +14,7 @@
 import argparse
 import atexit
 import functools
+import json
 import os
 import re
 import shutil
@@ -26,7 +27,8 @@ from flask import Flask, abort, jsonify, redirect, request, send_from_directory
 
 import agent as agent_module
 import window_layout
-from agent import MODELS, PROVIDERS, DEFAULT_MODEL, Agent, list_runs, load_lessons, load_run, summarize_run
+from agent import (MODELS, PROVIDERS, DEFAULT_MODEL, LOGS_DIR, STATES_DIR, STATE_MAX_BYTES, Agent, list_runs,
+                   load_lessons, load_run, summarize_run)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(HERE, "web")
@@ -350,6 +352,22 @@ def bridge_heartbeat():
     return jsonify({"ok": True})
 
 
+@app.post("/api/bridge/state")
+@bridge_only
+def bridge_state():
+    """⑧ 게임 상태 (주인공이 입력을 기다리게 될 때마다, docs/project/game-state.md). 저장과 이정표에만 쓴다.
+    명령(⑨)은 아직 없으므로 want_command는 언제나 false (A-6-2)."""
+    if (request.content_length or 0) > STATE_MAX_BYTES:
+        return jsonify({"ok": False, "reason": "too_large"}), 413
+    data = body()
+    a = running_agent(data.get("run_id"))
+    if not a:
+        return jsonify({"ok": False, "reason": "not_running"}), 409
+    if not a.receive_state(data):
+        return jsonify({"ok": False, "reason": "bad_state"}), 400
+    return jsonify({"ok": True, "want_command": False})
+
+
 @app.post("/api/bridge/ended")
 @bridge_only
 def bridge_ended():
@@ -499,6 +517,18 @@ def run_detail(run_id):
     if not run:
         abort(404)
     return jsonify(run)
+
+
+@app.get("/api/run/<run_id>/state/<int:seq>")
+def run_state(run_id, seq):
+    """기록 창·리포트용: 그 판단 때의 게임 데이터. 이정표용 record 칸은 화면에 보이지 않으므로 돌려주지 않는다."""
+    path = os.path.join(LOGS_DIR, os.path.basename(run_id), STATES_DIR, f"{seq:05d}.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, ValueError):
+        abort(404)
+    return jsonify({"seq": data.get("seq"), "reasons": data.get("reasons") or [], "ai": data.get("ai") or {}})
 
 
 @app.post("/api/run/<run_id>/summary")

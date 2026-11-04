@@ -26,6 +26,15 @@ import com.badlogic.gdx.Net;
 import com.badlogic.gdx.utils.JsonReader;
 import com.badlogic.gdx.utils.JsonValue;
 import com.badlogic.gdx.utils.JsonWriter;
+import com.shatteredpixel.shatteredpixeldungeon.actors.Char;
+import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
+import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Goo;
+import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mimic;
+import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
+import com.shatteredpixel.shatteredpixeldungeon.items.Item;
+import com.shatteredpixel.shatteredpixeldungeon.items.potions.Potion;
+import com.shatteredpixel.shatteredpixeldungeon.items.rings.Ring;
+import com.shatteredpixel.shatteredpixeldungeon.items.scrolls.Scroll;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.InterlevelScene;
@@ -34,8 +43,12 @@ import com.shatteredpixel.shatteredpixeldungeon.utils.GLog;
 import com.watabou.noosa.Game;
 import com.watabou.noosa.Scene;
 import com.watabou.utils.Callback;
+import com.watabou.utils.Signal;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedList;
 
 //[nokpixel-ai-watcher] 게임 → AI 관찰기(ai-bridge/web.py) 통로 (docs/project/bridge.md 3장)
 //게임이 묻고 Python이 답한다. 응답은 다른 스레드에서 오므로 렌더 스레드로 넘겨서 돌려준다.
@@ -64,14 +77,195 @@ public class AIBridge {
 	private static boolean deathSent;
 	private static int heartbeatFails;
 
+	//⑧ 상태 보내기 (docs/project/game-state.md, A-6-2): 주인공이 입력을 기다리게 될 때마다 한 번
+	private static final int LOG_LINES = 8; //마지막 상태 뒤에 나온 메시지를 이만큼까지 모은다
+	private static int stateSeq;
+	private static Scene stateScene;
+	private static boolean wasWaiting;
+	private static int prevDepth, prevHP;
+	private static HashSet<Integer> prevEnemies = new HashSet<>(); //직전 상태에 보이던 적 (비교에만 쓰고 밖으로 보내지 않는다)
+	private static Item prevWeapon, prevArmor;
+	private static int equipChanges;
+	private static Goo goo; //5층 보스 (이정표 기록용)
+	private static boolean gooSeen, gooDead;
+	private static final LinkedList<JsonValue> logLines = new LinkedList<>();
+
+	//게임 메시지(GLog)를 모은다. 액터 스레드에서도 불리므로 잠근다. false를 돌려 화면 기록창도 그대로 받게 한다
+	private static final Signal.Listener<String> logListener = new Signal.Listener<String>() {
+		@Override
+		public boolean onSignal( String text ) {
+			collectLog(text);
+			return false;
+		}
+	};
+
 	//GameScene.update()에서 매 프레임 불린다
 	public static void onGameUpdate(){
 		try {
 			if (pendingRunId != null) checkArrival();
-			if (activeRunId != null) heartbeat();
+			if (activeRunId != null) {
+				//화면 기록창(GameLog)은 새로 만들어질 때 replace()로 다른 듣는 쪽을 모두 지운다 (층 이동·이어하기).
+				//add()는 이미 붙어 있으면 아무것도 하지 않으므로, 매 프레임 불러 지워졌으면 다시 붙인다
+				GLog.update.add(logListener);
+				checkWaiting();
+				heartbeat();
+			} else {
+				GLog.update.remove(logListener);
+			}
 		} catch (Exception e) {
 			Game.reportException(e);
 		}
+	}
+
+	private static void resetState(){
+		stateSeq = 0;
+		stateScene = null;
+		wasWaiting = false;
+		prevDepth = -1;
+		prevHP = 0;
+		prevEnemies = new HashSet<>();
+		prevWeapon = prevArmor = null;
+		equipChanges = 0;
+		goo = null;
+		gooSeen = gooDead = false;
+		synchronized (logLines) { logLines.clear(); }
+	}
+
+	private static void collectLog( String text ){
+		if (text == null || text.equals(GLog.NEW_LINE)) return;
+		String kind = "normal";
+		if (text.startsWith(GLog.POSITIVE)) { kind = "good"; text = text.substring(GLog.POSITIVE.length()); }
+		else if (text.startsWith(GLog.NEGATIVE)) { kind = "bad"; text = text.substring(GLog.NEGATIVE.length()); }
+		else if (text.startsWith(GLog.WARNING)) { kind = "warning"; text = text.substring(GLog.WARNING.length()); }
+		else if (text.startsWith(GLog.HIGHLIGHT)) { kind = "highlight"; text = text.substring(GLog.HIGHLIGHT.length()); }
+		text = text.trim();
+		if (text.isEmpty()) return;
+		JsonValue line = object();
+		line.addChild("kind", new JsonValue(kind));
+		line.addChild("text", new JsonValue(text));
+		synchronized (logLines) {
+			logLines.add(line);
+			while (logLines.size() > LOG_LINES) logLines.removeFirst();
+		}
+	}
+
+	//주인공이 입력을 기다리게 된 순간(거짓→참), 또는 GameScene이 새로 생긴 뒤 처음 기다릴 때 상태를 보낸다
+	private static void checkWaiting(){
+		Scene scene = Game.scene();
+		if (scene != stateScene) {
+			stateScene = scene;
+			wasWaiting = false;
+		}
+		Hero hero = Dungeon.hero;
+		boolean waiting = hero != null && hero.isAlive() && hero.ready && Dungeon.level != null
+				&& InterlevelScene.mode == InterlevelScene.Mode.NONE;
+		if (waiting && !wasWaiting) sendState();
+		wasWaiting = waiting;
+	}
+
+	private static void sendState(){
+		Hero hero = Dungeon.hero;
+		ArrayList<JsonValue> log;
+		synchronized (logLines) {
+			log = new ArrayList<>(logLines);
+			logLines.clear();
+		}
+		JsonValue ai = GameState.build(log);
+
+		//보이는 적 (정체 전 미믹 제외)
+		HashSet<Integer> enemies = new HashSet<>();
+		for (Mob m : Dungeon.level.mobs.toArray(new Mob[0])){
+			if (GameState.seenChar(m, Dungeon.level) && m.alignment == Char.Alignment.ENEMY && !(m instanceof Mimic && m.alignment == Char.Alignment.NEUTRAL)){
+				enemies.add(m.id());
+			}
+		}
+
+		//끝난 이유 (game-state.md 3-3). Hero는 고치지 않고 직전 상태와 비교해서 정한다
+		JsonValue reasons = GameState.array();
+		if (prevDepth < 0) {
+			reasons.addChild(new JsonValue("start"));
+		} else {
+			if (Dungeon.depth != prevDepth) {
+				reasons.addChild(new JsonValue("level_changed"));
+			} else {
+				for (Integer id : enemies) {
+					if (!prevEnemies.contains(id)) { reasons.addChild(new JsonValue("interrupted_enemy")); break; }
+				}
+				if (hero.HP < prevHP) {
+					//게임이 화면을 빨갛게 번쩍이는 식과 같다 (Hero.damage)
+					float percentDMG = (prevHP - hero.HP) / (float)prevHP;
+					float percentHP = hero.HP / (float)hero.HT;
+					boolean heavy = percentHP > 0 && 0.25f * percentDMG * percentDMG / percentHP >= 0.05f;
+					reasons.addChild(new JsonValue(heavy ? "damaged_heavy" : "damaged"));
+				}
+			}
+			if (hero.lastAction != null) reasons.addChild(new JsonValue("interrupted"));
+			if (GameScene.interfaceBlockingHero()) reasons.addChild(new JsonValue("window"));
+			if (reasons.size == 0) reasons.addChild(new JsonValue("done"));
+		}
+		prevDepth = Dungeon.depth;
+		prevHP = hero.HP;
+		prevEnemies = enemies;
+
+		JsonValue body = object();
+		body.addChild("state_version", new JsonValue(GameState.VERSION));
+		body.addChild("run_id", new JsonValue(activeRunId));
+		body.addChild("seq", new JsonValue(++stateSeq));
+		body.addChild("reasons", reasons);
+		body.addChild("last_command", new JsonValue(JsonValue.ValueType.nullValue)); //명령은 A-6-3에서
+		body.addChild("ai", ai);
+		body.addChild("record", record(hero));
+		post("/api/bridge/state", body, SHORT_TIMEOUT, new Listener() {
+			@Override
+			public void onResult(JsonValue result) {
+				//실패하면 버린다. 다음 대기 때 새 상태를 보낸다. want_command는 A-6-3부터 쓴다
+			}
+		});
+	}
+
+	//이정표 기록용 값 (docs/project/progress-milestones.md). AI 입력에는 넣지 않는다.
+	//정체를 아는 아이템 종류는 숫자만 보낸다 (어떤 아이템인지는 보내지 않는다)
+	private static JsonValue record( Hero hero ){
+		Item weapon = hero.belongings.weapon(), armor = hero.belongings.armor();
+		if (stateSeq > 1 && (weapon != prevWeapon || armor != prevArmor)) equipChanges++;
+		prevWeapon = weapon;
+		prevArmor = armor;
+
+		int items = 0;
+		for (Item item : hero.belongings) items += item.quantity();
+
+		JsonValue r = object();
+		r.addChild("enemies_slain", new JsonValue(Statistics.enemiesSlain));
+		r.addChild("deepest_floor", new JsonValue(Statistics.deepestFloor));
+		r.addChild("hero_lvl", new JsonValue(hero.lvl));
+		r.addChild("upgrades_used", new JsonValue(Statistics.upgradesUsed));
+		r.addChild("equip_changes", new JsonValue(equipChanges));
+		r.addChild("items_total", new JsonValue(items));
+		r.addChild("known_types", new JsonValue(Potion.getKnown().size() + Scroll.getKnown().size() + Ring.getKnown().size()));
+
+		//5층 보스 구: 한 번이라도 보였는지, 체력 비율, 쓰러졌는지
+		if (Dungeon.depth == 5) {
+			Goo found = null;
+			for (Mob m : Dungeon.level.mobs.toArray(new Mob[0])){
+				if (m instanceof Goo) { found = (Goo) m; break; }
+			}
+			if (found != null && found.isAlive()) {
+				goo = found;
+				if (Dungeon.level.heroFOV[found.pos]) gooSeen = true;
+			} else if (goo != null) {
+				gooDead = true; //본 적 있는 구가 층에서 사라졌거나 죽었다
+			}
+		}
+		if (goo != null) {
+			JsonValue boss = object();
+			boss.addChild("seen", new JsonValue(gooSeen));
+			boss.addChild("hp_ratio", new JsonValue(gooDead ? 0.0 : Math.round(100.0 * goo.HP / goo.HT) / 100.0));
+			boss.addChild("dead", new JsonValue(gooDead));
+			r.addChild("boss", boss);
+		} else {
+			r.addChild("boss", new JsonValue(JsonValue.ValueType.nullValue));
+		}
+		return r;
 	}
 
 	//⑥ 사망: GameScene.gameOver()에서 불린다
@@ -162,6 +356,7 @@ public class AIBridge {
 			@Override
 			public void onResult(JsonValue result) {
 				if (result != null && result.getBoolean("ok", false)) {
+					resetState(); //⑧ 상태 번호와 비교 값을 새 판으로 (다음 프레임에 첫 상태 start를 보낸다)
 					activeRunId = runId;
 					sinceHeartbeat = HEARTBEAT_EVERY; //첫 신호를 바로 보낸다
 					deathSent = false;

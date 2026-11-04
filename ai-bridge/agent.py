@@ -941,6 +941,12 @@ class Agent:
                 self.end_reason = "game_closed"
         self.config.update(ended_reason=self.end_reason, ended_depth=self.depth,
                            ended_at=datetime.now().isoformat(timespec="seconds"))
+        if os.path.isdir(os.path.join(self.run_dir, STATES_DIR)):  # 게임 상태에 숨길 글자가 새지 않았는지 검사
+            try:
+                import check_hidden
+                self.config["hidden_check"] = check_hidden.check_run(self.run_dir)
+            except Exception as error:  # 검사가 실패해도 판 끝은 그대로
+                self.config["hidden_check"] = {"result": "error", "error": str(error)}
         self._save_config()
 
     def _save_config(self):

@@ -1,6 +1,7 @@
 # 게임 데이터 전달 · 게임 함수 명령 설계
 
-> [A-6-1] 설계 문서. 코드는 고치지 않았다. 이 문서대로 A-6-2부터 만든다.
+> [A-6-1] 설계 문서. 이 문서대로 A-6-2부터 만든다.
+> **A-6-2(데이터 읽기·숨기기·⑧ 상태 보내기·이정표 자동 기록)를 만들었다** (11/4). AI 입력은 그대로다 — 데이터는 기록과 이정표에만 쓴다. 만든 것과 설계와 다른 점은 9장.
 
 지금 AI는 게임 화면 사진만 보고 키를 눌러 한 칸씩 움직인다. 11/2 실제 판(`run_20261102_182004_player`)에서 AI는 1층 입구(올라가는 계단)를 출구로 알고 거듭 밟았고, 가 본 곳을 기억하지 못했고, 판단 한 번에 1~3칸만 움직였다 (`docs/test-results/test-results-2026-11-02.txt` 6장).
 그래서 AI가 **화면에 보이는 것과 같은 범위의 게임 데이터**를 함께 받고, **게임 함수로 목적 단위 명령**("(12,7)까지 가기", "체력이 찰 때까지 쉬기")을 내리게 한다.
@@ -406,7 +407,7 @@ sequenceDiagram
 
 - 💭 판정은 Python(`agent.py`)이 상태를 받을 때마다 한다. 처음 맞을 때 `logs/<판>/milestones.json`에 `{id, label, points, step, at, depth}`를 한 줄씩 더한다. `step`은 그 상태를 받은 판단 번호다.
 - 💭 같은 이정표는 한 판에 한 번만 (progress-milestones.md 규칙). 합계와 이정표별 판단 번호를 리포트·실험 목록에 보인다.
-- 💭 판 끝 이유(`ended_reason`)는 지금처럼 `config.json`에 있다. 사망 원인은 ⬜ (`Hero.die(cause)`는 고치지 않으므로, 판 끝 직전 상태의 마지막 메시지로 대신하는 안).
+- 💭 판 끝 이유(`ended_reason`)는 지금처럼 `config.json`에 있다. 사망 원인은 ⬜ 사인 기록 안 됨 (A-6-3에서 넣음. 순위 기록에서 읽기를 먼저 검토, 화면 글자 그대로 `ended_cause`).
 - 지난 기록(11/4 이전)은 상태가 없어 이정표가 없다. 리포트는 "이정표 기록 없음"으로 보인다. 지난 판끼리는 도달 층·끝난 이유로만 비교한다.
 
 ---
@@ -445,3 +446,48 @@ sequenceDiagram
 - 1층 입구 밟기·주문서 읽기 등에서 뜨는 창의 종류 (3-3).
 - `Dungeon.quickslot`으로 단축 슬롯을 읽는 방법.
 - 한국어 게임에서 실제 이름 글자 (예시 JSON의 이름은 예시).
+
+---
+
+## 9. A-6-2 결과 (11/4)
+
+**고친 파일**
+| 파일 | 내용 |
+|---|---|
+| `core/.../GameState.java` (새 파일) | 1장의 데이터(`ai` 칸)와 2장의 숨기기. 겉모습 지형 `face()`, 문자 지도, 적·바닥·계단·함정·식물·가방 |
+| `core/.../AIBridge.java` | 대기 감지와 끝난 이유(3-3), ⑧ 보내기, 메시지 듣는 쪽, 이정표용 `record` 칸 |
+| `ai-bridge/web.py` | `POST /api/bridge/state`(⑧), `GET /api/run/<판>/state/<seq>`(화면용, `record` 빼고), `/api/runs`에 `points` |
+| `ai-bridge/agent.py` | `receive_state()`(저장·이정표), 판단 기록의 `state_seq`, `milestones.json`, 판 끝 숨김 검사, `load_run()`의 `milestones` |
+| `ai-bridge/check_hidden.py` (새 파일) | 숨김 검사 (2-1) |
+| `ai-bridge/web/static/common.js`, `style.css`, `log.html`, `report.html` | 판단 상세의 "🗺️ 그때 게임 데이터" 접힘 칸, 리포트의 진행도 이정표 |
+
+`GameScene`·`Hero`·`Level`·`GameLog`는 고치지 않았다.
+
+**동작**
+- AI 판(`activeRunId`) 동안, `GameScene.update()`마다 `hero.isAlive() && hero.ready && InterlevelScene.mode == NONE`이 거짓→참으로 바뀌거나 GameScene이 새로 생긴 뒤 처음 참일 때 상태를 하나 만들어 ⑧로 보낸다. 실패하면 버린다.
+- `reasons`: `start`(판 첫 상태), `level_changed`, `interrupted_enemy`(보이는 적 중 새 것. 비교에 쓰는 적 번호 `Actor.id()`는 밖으로 보내지 않음), `damaged`/`damaged_heavy`(게임의 빨간 번쩍임과 같은 식, `Hero.java:1694-1699`), `interrupted`(`hero.lastAction != null`), `window`(`interfaceBlockingHero()`), 그 밖 `done`.
+- 지금은 키 하나가 한 턴이라 판단 한 번에 상태가 1~3개 생긴다. 판단 기록에는 화면을 찍기 직전에 받은 상태 번호를 `state_seq`로 남긴다 (게임에서 시작한 판만. `mvp.py` 판의 줄 모양은 그대로).
+- 키를 보내는 시점·화면을 찍는 시점은 그대로다 (상태를 기다리지 않음).
+- **메시지**: `GLog.update`에 듣는 쪽을 AI 판 동안 매 프레임 `add`한다. `Signal.add()`는 이미 있으면 다시 넣지 않으므로(✅ `Signal.java:40`), `GameLog`가 새로 만들어지며 `replace()`로 지워도 다음 프레임에 다시 붙는다. 최대 8줄, 종류 `good`·`bad`·`warning`·`highlight`·`normal`.
+- **`record` 칸** (AI 입력·화면에 안 나옴, 이정표 판정에만): `enemies_slain`, `deepest_floor`, `hero_lvl`, `upgrades_used`, `equip_changes`(장착 무기·갑옷 물건이 바뀐 횟수), `items_total`(장착+가방 수량 합), `known_types`(정체를 아는 물약·주문서·반지 **종류 수**만. 어떤 것인지는 보내지 않음. `GameState`가 아니라 `AIBridge`에서 셈), `boss`(5층 구: `seen`, `hp_ratio`, `dead`).
+- 숨김 검사: 판이 끝날 때 `states/`가 있으면 `check_hidden.check_run()` → `config.json`의 `hidden_check` (`clean` / `found` / `no_states` / `error`).
+
+**설계와 다른 점**
+- 장착 칸은 이름 글이 아니라 `{"name", "cursed"}` 객체다. 적에는 `side`(enemy/ally/neutral)를 더했다.
+- 계단에는 `note`가 없다 (A-6-2 오더: 우리 설명은 힌트가 됨).
+- 이정표 판정은 6장의 상태 비교 그대로지만, 기준을 정했다 → [progress-milestones.md](progress-milestones.md) "자동 기록 기준".
+
+**확인한 것** (11/4, 1장 표기: `docs/test-results/test-results-2026-11-04.txt`)
+- ✅ `desktop:compileJava`, `py_compile`
+- ✅ AI 입력(규칙·도구·판단 요청 글·큰 점검·교훈 쓰기)이 바꾸기 전과 글자까지 같음 (mvp 판, 게임 판 기본 목표)
+- ✅ 데모 서버에 가짜 상태: 저장, `state_seq`, 거절(403·409·400·413), 이정표 47/51점, 숨김 검사 clean / 일부러 넣은 글자는 found
+- ✅ 리포트·기록 창 화면 (headless Edge), 지난 판은 "이정표 기록 없음"
+- ✅ 실제 판 2개 (1층에서 끝남, 시험 기록 3장): 상태 저장·`state_seq`, reason(`start`·`window`·`interrupted_enemy`·`damaged`·`damaged_heavy`), 적 체력 4단계·잠듦, 시야 밖 적 빠짐, 메시지(`warning`), 판 끝 숨김 검사 clean
+- ✅ 실제 상태 크기: 1층에서 약 1.2~1.3KB (지도 8×8 ~ 14×8 정도)
+- ⬜ 게임 안: 숨겨진 문·함정 (고정 시드 1층에 없었음), 미감정 물약 이름, 층 이동 뒤 메시지, 이정표가 실제로 찍히는지 (손 시험 목록 2장)
+- ⬜ 오더의 "GPT-6 Luna, 최대 20" 판 (실제 판은 Luna 30→40, Astra 30)
+
+**알려진 한계**
+- `GameScene.create()` 안에서 나오는 글(층 도착 문구, `GameScene.java:626-629`)은 우리 듣는 쪽이 다시 붙기 전이라 놓칠 수 있다. 층은 데이터의 `depth`로 안다.
+- 투명해진 적, 숨은 미믹(`MimicTooth`)의 보임 여부는 ⬜ 그대로다. 지금은 게임의 칸 살펴보기와 같은 조건(`heroFOV`)만 쓴다.
+- ⬜ 사인 기록 안 됨 (A-6-3에서 넣음). ⑥은 끝난 이유만 보내고, 죽은 순간에는 상태(⑧)도 없다(살아 있을 때만 보냄). A-6-3: `Hero.die()`는 고치지 않고 순위 기록에서 읽는 방법을 먼저 검토하며, 게임 오버·순위 화면에 보이는 글자 그대로만 `ended_cause`로 남긴다.

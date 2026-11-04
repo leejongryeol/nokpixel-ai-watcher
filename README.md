@@ -76,7 +76,7 @@ AI가 사람처럼 **게임 화면을 보고 키보드·마우스로 조작**합
 ### 다음 단계 (예정)
 게임 코드에 연결 지점을 추가해 **판단 요청 시점**(`Hero.ready()`)과 **게임 속 글 정보**(체력, 층, 주변 적, 가방)를 직접 받아올 예정입니다.
 캐릭터 선택 뒤 게임 안 "AI 설정" 장면과 게임 ↔ Python 약속: [docs/project/bridge.md](docs/project/bridge.md) (장면·값 전달·`config.json` 기록, 던전 도착 뒤 AI 자동 시작·판 끝에 멈춤을 만듦. 게임 안 손 시험은 예정)
-게임 데이터(보이는 것만) 전달과 게임 함수 명령 설계: [docs/project/game-state.md](docs/project/game-state.md) (설계만, A-6-2부터 만들 예정)
+게임 데이터(보이는 것만) 전달과 게임 함수 명령 설계: [docs/project/game-state.md](docs/project/game-state.md) (A-6-2: 게임이 보이는 범위의 데이터를 보내고, 판단마다 저장하고, 진행도 이정표를 자동 기록해요. AI 입력은 아직 그대로. 명령은 예정)
 
 자세한 내용: [docs/project/architecture.md](docs/project/architecture.md)
 

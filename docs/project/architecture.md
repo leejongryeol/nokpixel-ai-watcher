@@ -24,6 +24,8 @@ AI가 사람처럼 **게임 화면을 보고 키보드·마우스로 조작**한
 | 게임 | `desktop/.../DesktopLauncher.java` | 녹픽던 원본. 세로 창 3단계 크기와 모바일 화면·배율만 고정 (아래 "게임 창 크기와 AI 사진") |
 | AI 설정 장면 | `core/.../scenes/AISetupScene.java` (+ `HeroSelectScene` [시작], `SPDSettings` `ai_*`, `TextInput.setPasswordMode`, `scenes*.properties`) | 캐릭터 선택 → AI 설정 → 던전. Python에 상태를 묻고 키 보내기·연결 시험·판 준비(`config.json`)까지 한다. 관찰기가 꺼져 있으면 [AI 관찰기 켜기]로 `web.py --panels`를 새 명령 창에서 켠다. 게임에서 시작하는 판은 언제나 실제 조작. 던전 1층 도착(⑤)에서 AI 판이 자동으로 시작하고, `GameScene`의 `gameOver()`·`destroy()`에서 판 끝(⑥)을, AI 판 동안 1초마다 살아 있음 신호(⑦)를 보낸다 (A-5-4). 자세한 것: [bridge.md](bridge.md) 3장·9장 |
 | 게임 ↔ Python 통로 | `core/.../AIBridge.java`, `web.py`의 `/api/bridge/*` | 게임이 `Gdx.net`으로 `127.0.0.1:8765`에 묻고, 응답은 렌더 스레드로 넘긴다. 실패해도 게임은 멈추지 않는다 |
+| 게임 데이터 | `core/.../GameState.java`, `AIBridge`의 ⑧ | 주인공이 입력을 기다리게 될 때마다 화면에 보이는 범위의 데이터(문자 지도 등)를 만들어 보낸다. 숨길 정보는 이 파일 안에서 걸러 낸다. Python은 `states/`에 저장하고 진행도 이정표(`milestones.json`)를 판정한다. **AI 입력에는 아직 넣지 않는다** (A-6-2, [game-state.md](game-state.md)) |
+| 숨김 검사 | `ai-bridge/check_hidden.py` | 판 끝에 상태 파일에서 시드·클래스 이름 등 금지 글자를 찾아 `config.json`의 `hidden_check`에 남긴다 |
 | AI 플레이어 | `ai-bridge/agent.py` | 화면 캡처 → AI 모델 호출(Claude / OpenAI) → 키·클릭 실행 → 기록 |
 | 관찰 웹 화면 | `ai-bridge/web.py`, `ai-bridge/web/` | 실시간 관찰, 리포트·되감기, 실험 설정 화면은 데모 전용 (내 컴퓨터에서만 접속) |
 | 두 창 관찰 화면 | `web/panel.html`, `web/log.html`, `ai-bridge/window_layout.py` | 관찰 패널(`/panel`), 판단별 상세는 기록 창(`/log`). `python web.py --panels`로 Edge 앱 창으로 띄우고 게임 창 오른쪽에 배치 |
@@ -119,7 +121,7 @@ AI가 사람처럼 **게임 화면을 보고 키보드·마우스로 조작**한
 
 화면만으로는 체력·층 같은 정확한 정보와 판단 시점을 알기 어렵다. 게임 코드에 연결 지점을 추가할 예정이다.
 게임 안 AI 설정 장면과 게임 ↔ Python 약속(통로, 주고받는 값, 키 처리)은 [bridge.md](bridge.md)에 따로 정리했다. 장면 화면과 값 기억(A-5-2), 값 전달과 `config.json` 자동 기록(A-5-3), 던전 도착 뒤 AI 자동 시작과 판 끝에 멈춤(A-5-4)은 만들었다. 관찰기 사용성 묶음(A-5-5: 개입 표시, 관찰기 켜기 버튼, 한도 도달·판단 추가, 생각 표시)도 만들었다. A-5-4·A-5-5의 게임 안 손 시험은 예정이다.
-게임 데이터(보이는 것만)를 AI에게 넘기고 게임 함수 명령으로 행동하게 하는 설계는 [game-state.md](game-state.md)에 정리했다 (A-6-1, 설계만. 아래 표의 "미정" 통신은 그 문서 4장의 안).
+게임 데이터(보이는 것만)를 AI에게 넘기고 게임 함수 명령으로 행동하게 하는 설계는 [game-state.md](game-state.md)에 정리했다 (A-6-1). 아래 표의 "미정" 통신은 그 문서 4장의 안이다. 게임 데이터 보내기·저장·이정표 자동 기록(A-6-2)은 만들었고, AI 입력에 넣기와 명령은 예정이다.
 
 ```
 녹픽던 게임 ── Hero.ready() 감지 ──▶ 게임 상태(JSON) ──▶ ai-bridge ──▶ Claude

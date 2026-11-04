@@ -507,7 +507,9 @@ def runs():
                            "steps": len(run["entries"]), "demo": c.get("demo", False),
                            # 개입: 힌트 글 수, 일시정지 + F12 비상 해제 수 (common.js의 interventions와 같은 규칙)
                            "hints": sum(len(e.get("hints") or []) for e in run["entries"]),
-                           "pauses": len(c.get("pauses") or []) + len(c.get("unlocks") or [])})
+                           "pauses": len(c.get("pauses") or []) + len(c.get("unlocks") or []),
+                           # 진행도 점수: 이정표 기록이 없는 판(A-6-2 이전)은 None
+                           "points": None if run["milestones"] is None else sum(m.get("points", 0) for m in run["milestones"])})
     return jsonify(result)
 
 

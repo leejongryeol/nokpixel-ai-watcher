@@ -66,6 +66,7 @@
       <div class="tile"><div class="panel-title">개발자 개입</div><div class="v" id="t-hints">0<small>회</small></div><div class="muted" id="t-hints-sub" style="font-size: 12px"></div></div>
       <div class="tile"><div class="panel-title">근거가 추측</div><div class="v" id="t-guess" style="color: var(--red)">0<small>회</small></div></div>
       <div class="tile"><div class="panel-title">메모 스스로 지움</div><div class="v" id="t-memodel">0<small>회</small></div></div>
+      <div class="tile"><div class="panel-title">진행도 이정표</div><div class="v" id="t-points">-</div><div class="muted" id="t-points-sub" style="font-size: 12px"></div></div>
     </div>
   </div>
 
@@ -109,6 +110,8 @@
       <button id="summarize" class="btn" type="button" style="align-self: flex-start">AI에게 요약 받기</button>
       <h3 class="panel-title" style="margin: 8px 0 0">중간 목표가 바뀐 순서</h3>
       <div id="goals" class="list"></div>
+      <h3 class="panel-title" style="margin: 8px 0 0">🏁 진행도 이정표 (게임 데이터로 자동 기록, AI에게는 알려 주지 않음)</h3>
+      <div id="milestones" class="list"></div>
     </section>
 
     <section class="panel" style="display: flex; flex-direction: column; gap: 10px">
@@ -188,6 +191,18 @@ function show(data) {
   $("flag").classList.toggle("hidden", !n.total);
   $("t-guess").replaceChildren(String(es.filter((e) => e.basis === "추측").length), el("small", { text: "회" }));
   $("t-memodel").replaceChildren(String(es.filter((e) => e.memo_removed).length), el("small", { text: "회" }));
+  // 진행도 이정표 (A-6-2부터). milestones가 null이면 게임 상태를 받지 않은 판
+  const ms = data.milestones;
+  if (ms === null || ms === undefined) {
+    $("t-points").textContent = "-";
+    $("t-points-sub").textContent = "이정표 기록 없음";
+    listOrEmpty($("milestones"), [], "이정표 기록 없음 (게임 데이터를 받기 전의 판)");
+  } else {
+    $("t-points").replaceChildren(String(ms.reduce((n, m) => n + (m.points || 0), 0)), el("small", { text: ` / ${data.milestone_max}점` }));
+    $("t-points-sub").textContent = `이정표 ${ms.length}개`;
+    listOrEmpty($("milestones"), ms.map((m) => el("div", {},
+      el("span", { class: "s", text: `판단 ${m.step}  ` }), `${m.label} +${m.points}` + (m.depth ? ` (${m.depth}층)` : ""))), "아직 닿은 이정표가 없어요.");
+  }
 
   const heights = { cmd: 16, goal: 40, memo: 28, memodel: 28, hint: 34, guess: 22 };
   $("ticks").replaceChildren(...es.map((e, i) => {
@@ -228,7 +243,7 @@ async function init() {
   const runs = await api("/api/runs");
   if (!runs.length) { $("no-run").classList.remove("hidden"); $("main").classList.add("hidden"); return; }
   $("run").replaceChildren(...runs.map((r) => el("option", { value: r.run_id,
-    text: `${r.run_id.slice(4, 17).replace("_", " ")} · ${r.player} · ${r.model_name} · ${r.steps}회${r.demo ? " · 데모" : ""}${r.hints + r.pauses ? " · ⭐개입" : ""}` })));
+    text: `${r.run_id.slice(4, 17).replace("_", " ")} · ${r.player} · ${r.model_name} · ${r.steps}회${r.demo ? " · 데모" : ""}${r.hints + r.pauses ? " · ⭐개입" : ""}${r.points !== null && r.points !== undefined ? ` · 🏁${r.points}점` : ""}` })));
   const wanted = new URLSearchParams(location.search).get("run");
   const first = runs.some((r) => r.run_id === wanted) ? wanted : runs[0].run_id;
   $("run").value = first;

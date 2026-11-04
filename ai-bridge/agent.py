@@ -46,7 +46,16 @@ LESSONS_FILE = "lessons.md"  # 판이 끝나고 AI가 쓴 교훈
 INHERITED_FILE = "inherited_lessons.md"  # 판을 시작할 때 이어받은 교훈 (기록용 사본)
 FINAL_IMAGE = "final.png"  # 판이 끝난 뒤 화면 (마지막 행동의 결과, 교훈 쓰기에 사용)
 STATES_DIR = "states"  # 게임이 보낸 상태(⑧)를 seq마다 저장 (docs/project/game-state.md). AI 입력에는 넣지 않는다 (A-6-2)
+MILESTONES_FILE = "milestones.json"  # 진행도 이정표 자동 기록 (docs/project/progress-milestones.md)
 STATE_MAX_BYTES = 1_000_000  # ⑧ 상태 하나의 최대 크기
+# 진행도 이정표: (id, 이름, 점수). 합계 51점. 판정은 Agent._judge_milestones()
+MILESTONES = [
+    ("first_kill", "첫 적 처치", 1), ("first_pickup", "첫 아이템 줍기", 1), ("floor2", "2층 도착", 1),
+    ("floor3", "3층 도착", 2), ("level3", "캐릭터 레벨 3 달성", 2), ("upgrade", "장비 강화", 2),
+    ("identify", "미감정 아이템 정체 확인", 2), ("floor4", "4층 도착", 4), ("floor5", "5층 도착", 4),
+    ("boss_seen", "보스 구와 전투 시작", 8), ("boss_half", "구 체력 절반 이하", 8), ("boss_dead", "구 처치", 16),
+]
+MILESTONE_MAX = sum(points for _, _, points in MILESTONES)
 BASIS_VALUES = ["화면", "기록", "추측"]
 WAIT_AFTER_ACTION = 0.6  # 행동 후 화면이 바뀔 때까지 기다리는 시간(초)
 FOCUS_RETRIES = 3  # 게임 창을 맨 앞으로 가져오기 시도 횟수 (입력 전 확인)
@@ -574,8 +583,11 @@ class Agent:
         self._hero_alive = True
         self.depth = None
         self.end_reason = ""
-        # 게임 데이터(⑧ 상태). 기록에만 쓰고 AI 입력에는 넣지 않는다
+        # 게임 데이터(⑧ 상태)와 진행도 이정표. 기록에만 쓰고 AI 입력에는 넣지 않는다
         self.last_state_seq = None
+        self.milestones = []  # [{"id", "label", "points", "step", "at", "depth"}]
+        self._record_base = None  # 첫 상태의 record (늘어났는지 비교)
+        self._record_prev = None  # 직전 상태의 record
         # 세 창 관찰 화면용 (기록·AI 입력에는 들어가지 않는다)
         self.phase = "ready"  # ready → capture → thinking → acting → (typing) … → (limit) → done
         self.game = None
@@ -737,7 +749,7 @@ class Agent:
             }
 
     def receive_state(self, data):
-        """⑧ 게임이 보낸 상태: states/<seq>.json에 저장한다. 잘못된 상태면 False."""
+        """⑧ 게임이 보낸 상태: states/<seq>.json에 저장하고 이정표를 판정한다. 잘못된 상태면 False."""
         seq = data.get("seq")
         if not isinstance(seq, int) or isinstance(seq, bool) or seq <= 0 \
                 or not isinstance(data.get("ai"), dict) or not isinstance(data.get("record"), dict):
@@ -747,7 +759,42 @@ class Agent:
             with open(os.path.join(self.run_dir, STATES_DIR, f"{seq:05d}.json"), "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False)
             self.last_state_seq = seq
+            depth = (data["ai"].get("hero") or {}).get("depth")
+            self._judge_milestones(data["record"], depth if isinstance(depth, int) else None)
         return True
+
+    def _judge_milestones(self, record, depth):
+        """상태의 record로 이정표를 판정한다. 처음 맞을 때만 milestones.json에 더한다 (한 판에 한 번)."""
+        def num(rec, key):
+            value = (rec or {}).get(key)
+            return value if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
+
+        base = self._record_base = self._record_base or record
+        prev, self._record_prev = self._record_prev, record
+        boss = record.get("boss") if isinstance(record.get("boss"), dict) else {}
+        floor = num(record, "deepest_floor")
+        hit = {
+            "first_kill": num(record, "enemies_slain") > num(base, "enemies_slain"),
+            "first_pickup": prev is not None and num(record, "items_total") > num(prev, "items_total"),
+            "floor2": floor >= 2, "floor3": floor >= 3, "floor4": floor >= 4, "floor5": floor >= 5,
+            "level3": num(record, "hero_lvl") >= 3,
+            "upgrade": num(record, "upgrades_used") > num(base, "upgrades_used")
+                       or num(record, "equip_changes") > num(base, "equip_changes"),
+            "identify": num(record, "known_types") > num(base, "known_types"),
+            "boss_seen": boss.get("seen") is True,
+            "boss_half": boss.get("seen") is True and num(boss, "hp_ratio") <= 0.5,
+            "boss_dead": boss.get("dead") is True,
+        }
+        done = {m["id"] for m in self.milestones}
+        added = False
+        for mid, label, points in MILESTONES:
+            if hit.get(mid) and mid not in done:
+                self.milestones.append({"id": mid, "label": label, "points": points, "step": self.step,
+                                        "at": datetime.now().isoformat(timespec="seconds"), "depth": depth})
+                added = True
+        if added:
+            with open(os.path.join(self.run_dir, MILESTONES_FILE), "w", encoding="utf-8") as f:
+                json.dump(self.milestones, f, ensure_ascii=False, indent=2)
 
     def arrived(self, seed_code, depth):
         """게임이 던전에 도착했다고 알림(⑤). 실제 시드와 도착 층은 기록에만 남기고 AI 입력에는 넣지 않는다."""
@@ -1166,7 +1213,15 @@ def load_run(run_id):
             summary = f.read()
     except FileNotFoundError:
         pass
+    milestones = None  # None = 이정표 기록 없음 (상태를 받지 않은 판, A-6-2 이전 판)
+    try:
+        with open(os.path.join(run_dir, MILESTONES_FILE), encoding="utf-8") as f:
+            milestones = json.load(f)
+    except (FileNotFoundError, ValueError):
+        if os.path.isdir(os.path.join(run_dir, STATES_DIR)):
+            milestones = []  # 상태는 받았지만 아직 이정표가 없음
     return {"run_id": os.path.basename(run_id), "config": config, "entries": entries, "summary": summary,
+            "milestones": milestones, "milestone_max": MILESTONE_MAX,
             "lessons": read_text(os.path.join(run_dir, LESSONS_FILE)),
             "inherited_lessons": read_text(os.path.join(run_dir, INHERITED_FILE))}
 

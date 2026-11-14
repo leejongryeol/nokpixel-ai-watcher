@@ -54,6 +54,12 @@ public class AISetupScene extends PixelScene {
 	private static final float STATUS_EVERY = 3f; //장면에 있는 동안 상태 조회 간격(초)
 	private static final int LESSONS_MAX = 8; //교훈 고르기 창에 보여 줄 최근 판 수
 	private static final float LAUNCH_WAIT = 20f; //[AI 관찰기 켜기] 뒤 연결을 기다리는 최대 시간(초)
+	//최종 목표 단계 (A-6-4): 0 문 통과(시험용) · 1~5 5·10·15·20·25층 보스 · 6 엔딩. 목표 문장은 Python(agent.py GOAL_STAGES)이 정한다.
+	//SPDSettings에 함수를 더하지 않고 상속된 getInt/put으로 저장한다
+	private static final String KEY_GOAL_STAGE = "ai_goal_stage";
+	private static final String KEY_ON_GOAL = "ai_on_goal_next"; //달성하면: 참이면 다음 목표로, 거짓이면 끝내기(기본)
+	private static final int GOAL_STAGE_MAX = 6;
+	private static final int GOAL_STAGE_DEFAULT = 1;
 
 	private StyledButton btnWatcher;
 	private StyledButton btnModel;
@@ -62,6 +68,7 @@ public class AISetupScene extends PixelScene {
 	private StyledButton btnKey;
 	private StyledButton btnTest;
 	private StyledButton btnGoal;
+	private StyledButton btnOnGoal;
 	private StyledButton btnSteps;
 	private StyledButton btnLessons;
 	private StyledButton btnPlayer;
@@ -175,23 +182,24 @@ public class AISetupScene extends PixelScene {
 		//묶음 2: 실험 옵션
 		pos = section(Messages.get(this, "section_options"), left, pos, width);
 
-		//최종 목표와 최대 판단은 글자가 짧아서 한 줄에 반씩 둔다 (세로 화면 자리)
+		//최종 목표 단계와 달성 뒤 처리는 누를 때마다 바뀐다 (공략 버튼과 같은 방식). 글자가 짧아서 한 줄에 반씩 둔다 (세로 화면 자리)
 		btnGoal = button("", new Runnable() {
 			@Override
 			public void run() {
-				showGoalInput();
+				SPDSettings.put(KEY_GOAL_STAGE, (goalStage() + 1) % (GOAL_STAGE_MAX + 1));
+				flash = Messages.get(AISetupScene.class, "goal_set", goalLabel(goalStage()));
 			}
 		});
 		btnGoal.setRect(left, pos, half, BTN_HEIGHT);
 		align(btnGoal);
-		btnSteps = button("", new Runnable() {
+		btnOnGoal = button("", new Runnable() {
 			@Override
 			public void run() {
-				showStepsInput();
+				SPDSettings.put(KEY_ON_GOAL, !SPDSettings.getBoolean(KEY_ON_GOAL, false));
 			}
 		});
-		btnSteps.setRect(left + half + GAP, pos, half, BTN_HEIGHT);
-		align(btnSteps);
+		btnOnGoal.setRect(left + half + GAP, pos, half, BTN_HEIGHT);
+		align(btnOnGoal);
 		pos += BTN_HEIGHT + GAP;
 
 		btnLessons = button("", new Runnable() {
@@ -202,13 +210,24 @@ public class AISetupScene extends PixelScene {
 		});
 		pos = place(btnLessons, left, pos, width);
 
+		//최대 판단과 플레이어 이름도 한 줄에 반씩 (목표 줄이 하나 늘어난 만큼 줄 수를 그대로 둔다)
+		btnSteps = button("", new Runnable() {
+			@Override
+			public void run() {
+				showStepsInput();
+			}
+		});
+		btnSteps.setRect(left, pos, half, BTN_HEIGHT);
+		align(btnSteps);
 		btnPlayer = button("", new Runnable() {
 			@Override
 			public void run() {
 				showPlayerInput();
 			}
 		});
-		pos = place(btnPlayer, left, pos, width) + 6;
+		btnPlayer.setRect(left + half + GAP, pos, half, BTN_HEIGHT);
+		align(btnPlayer);
+		pos += BTN_HEIGHT + GAP + 6;
 
 		//시작
 		btnStartAI = button("", new Runnable() {
@@ -401,7 +420,8 @@ public class AISetupScene extends PixelScene {
 		body.addChild("dry_run", new JsonValue(false)); //게임에서 시작하는 AI 판은 언제나 실제 조작 (생각만 하기는 mvp.py --dry-run)
 		body.addChild("steps", new JsonValue(SPDSettings.aiSteps()));
 		body.addChild("lessons_from", new JsonValue(SPDSettings.aiLessonsFrom()));
-		body.addChild("final_goal", new JsonValue(SPDSettings.aiGoal())); //비어 있으면 기본 목표
+		body.addChild("goal_stage", new JsonValue(goalStage())); //최종 목표 단계 0~6 (A-6-4)
+		body.addChild("on_goal", new JsonValue(SPDSettings.getBoolean(KEY_ON_GOAL, false) ? "next" : "end"));
 		body.addChild("hero_class", new JsonValue(GamesInProgress.selectedClass != null ? GamesInProgress.selectedClass.name() : ""));
 		//AI 입력의 [이번 판]에 쓰는 이름: 게임 화면에 보이는 언어 그대로
 		body.addChild("hero_title", new JsonValue(GamesInProgress.selectedClass != null ? GamesInProgress.selectedClass.title() : ""));
@@ -535,7 +555,8 @@ public class AISetupScene extends PixelScene {
 		JsonValue key = key();
 		btnTest.enable(online && !running && !testing && !starting && key != null && key.getBoolean("present", false));
 
-		btnGoal.text(Messages.get(this, "goal", Messages.get(this, SPDSettings.aiGoal().isEmpty() ? "goal_default" : "goal_custom")));
+		btnGoal.text(Messages.get(this, "goal", goalLabel(goalStage())));
+		btnOnGoal.text(Messages.get(this, "on_goal", Messages.get(this, SPDSettings.getBoolean(KEY_ON_GOAL, false) ? "on_goal_next" : "on_goal_end")));
 		btnSteps.text(Messages.get(this, "steps", SPDSettings.aiSteps()));
 
 		String lessons = SPDSettings.aiLessonsFrom();
@@ -656,22 +677,14 @@ public class AISetupScene extends PixelScene {
 		});
 	}
 
-	//최종 목표: 비우면 기본 목표. 바꾸면 지난 판과 실험 조건이 달라진다 (config.json의 final_goal로 구분)
-	private void showGoalInput() {
-		ShatteredPixelDungeon.scene().addToFront(new WndTextInput(
-				Messages.get(this, "goal_title"),
-				Messages.get(this, "goal_desc"),
-				SPDSettings.aiGoal(), 100, false,
-				Messages.get(this, "ok"),
-				Messages.get(this, "cancel")) {
-			@Override
-			public void onSelect(boolean positive, String text) {
-				if (!positive) return;
-				SPDSettings.aiGoal(text.trim());
-				flash = Messages.get(AISetupScene.class, text.trim().isEmpty() ? "goal_set_default" : "goal_set", text.trim());
-				refresh();
-			}
-		});
+	//최종 목표 단계 (0~6). 저장값이 범위를 벗어나면 기본(1: 5층 보스)
+	private static int goalStage() {
+		return SPDSettings.getInt(KEY_GOAL_STAGE, GOAL_STAGE_DEFAULT, 0, GOAL_STAGE_MAX);
+	}
+
+	//버튼에 쓰는 짧은 이름 (예: "1 5층 보스"). AI에게 주는 목표 문장은 Python이 단계 번호로 정한다
+	private static String goalLabel( int stage ) {
+		return Messages.get(AISetupScene.class, "goal_stage_" + stage);
 	}
 
 	private void showStepsInput() {

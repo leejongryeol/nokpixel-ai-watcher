@@ -35,9 +35,11 @@ import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.shatteredpixel.shatteredpixeldungeon.items.potions.Potion;
 import com.shatteredpixel.shatteredpixeldungeon.items.rings.Ring;
 import com.shatteredpixel.shatteredpixeldungeon.items.scrolls.Scroll;
+import com.shatteredpixel.shatteredpixeldungeon.levels.Terrain;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.InterlevelScene;
+import com.shatteredpixel.shatteredpixeldungeon.scenes.TitleScene;
 import com.shatteredpixel.shatteredpixeldungeon.utils.DungeonSeed;
 import com.shatteredpixel.shatteredpixeldungeon.utils.GLog;
 import com.watabou.noosa.Game;
@@ -46,6 +48,7 @@ import com.watabou.utils.Callback;
 import com.watabou.utils.Signal;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedList;
@@ -90,6 +93,10 @@ public class AIBridge {
 	private static boolean gooSeen, gooDead;
 	private static final LinkedList<JsonValue> logLines = new LinkedList<>();
 
+	//최종 목표 달성 판정용 (A-6-4). ⑧ record로만 보내고 AI 입력에는 넣지 않는다
+	private static boolean doorPassed; //0단계: 주인공이 문 칸에 처음 들어섬
+	private static final ArrayList<Integer> bossesSlain = new ArrayList<>(); //1~5단계: 보스를 처치한 층 (5·10·15·20·25)
+
 	//게임 메시지(GLog)를 모은다. 액터 스레드에서도 불리므로 잠근다. false를 돌려 화면 기록창도 그대로 받게 한다
 	private static final Signal.Listener<String> logListener = new Signal.Listener<String>() {
 		@Override
@@ -107,6 +114,7 @@ public class AIBridge {
 				//화면 기록창(GameLog)은 새로 만들어질 때 replace()로 다른 듣는 쪽을 모두 지운다 (층 이동·이어하기).
 				//add()는 이미 붙어 있으면 아무것도 하지 않으므로, 매 프레임 불러 지워졌으면 다시 붙인다
 				GLog.update.add(logListener);
+				checkDoor();
 				checkWaiting();
 				heartbeat();
 			} else {
@@ -128,7 +136,28 @@ public class AIBridge {
 		equipChanges = 0;
 		goo = null;
 		gooSeen = gooDead = false;
+		doorPassed = false;
+		synchronized (bossesSlain) { bossesSlain.clear(); }
 		synchronized (logLines) { logLines.clear(); }
+	}
+
+	//문 칸에 들어선 것을 매 프레임 확인한다. 여러 칸을 한 번에 가는 이동 중에 지나가도 놓치지 않게 상태(⑧)를 보낼 때가 아니라 여기서 본다
+	private static void checkDoor(){
+		if (doorPassed || Dungeon.hero == null || Dungeon.level == null) return;
+		int pos = Dungeon.hero.pos;
+		if (pos < 0 || pos >= Dungeon.level.length()) return;
+		int t = Dungeon.level.map[pos];
+		if (t == Terrain.DOOR || t == Terrain.OPEN_DOOR) doorPassed = true;
+	}
+
+	//GameScene.bossSlain()에서 불린다 (보스가 쓰러질 때). 본 던전(branch 0)의 5층마다 보스만 센다. 갈래 퀘스트 보스는 뺀다
+	public static void onBossSlain(){
+		if (activeRunId == null) return;
+		int depth = Dungeon.depth;
+		if (Dungeon.branch != 0 || depth % 5 != 0 || depth < 5 || depth > 25) return;
+		synchronized (bossesSlain) {
+			if (!bossesSlain.contains(depth)) bossesSlain.add(depth);
+		}
 	}
 
 	private static void collectLog( String text ){
@@ -242,6 +271,12 @@ public class AIBridge {
 		r.addChild("equip_changes", new JsonValue(equipChanges));
 		r.addChild("items_total", new JsonValue(items));
 		r.addChild("known_types", new JsonValue(Potion.getKnown().size() + Scroll.getKnown().size() + Ring.getKnown().size()));
+		r.addChild("door_passed", new JsonValue(doorPassed));
+		JsonValue bosses = GameState.array();
+		synchronized (bossesSlain) {
+			for (Integer d : bossesSlain) bosses.addChild(new JsonValue(d));
+		}
+		r.addChild("bosses_slain", bosses);
 
 		//5층 보스 구: 한 번이라도 보였는지, 체력 비율, 쓰러졌는지
 		if (Dungeon.depth == 5) {
@@ -329,10 +364,25 @@ public class AIBridge {
 				} else {
 					heartbeatFails = 0;
 					//판이 이미 끝났다 (최대 판단, 중지, 관찰기 다시 켬)
-					if (!result.getBoolean("ok", false)) activeRunId = null;
+					if (!result.getBoolean("ok", false)) {
+						activeRunId = null;
+						//최종 목표를 이뤄 판을 끝냈다 (A-6-4): 게임 메뉴의 [타이틀로]와 같은 처리로 타이틀 화면에 간다.
+						//activeRunId를 먼저 지웠으므로 GameScene.destroy()에서 ⑥(quit)을 보내지 않는다
+						if (result.getBoolean("goto_title", false)) goToTitle();
+					}
 				}
 			}
 		});
+	}
+
+	private static void goToTitle(){
+		if (!(Game.scene() instanceof GameScene)) return;
+		try {
+			Dungeon.saveAll();
+		} catch (IOException e) {
+			ShatteredPixelDungeon.reportException(e);
+		}
+		Game.switchScene(TitleScene.class);
 	}
 
 	//⑤ 던전 도착: [AI로 시작]한 판의 첫 GameScene에서, 주인공이 조작을 기다릴 때 한 번만 보낸다

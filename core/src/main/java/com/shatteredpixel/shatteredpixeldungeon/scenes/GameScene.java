@@ -1628,6 +1628,7 @@ public class GameScene extends PixelScene {
 	}
 	
 	public static void bossSlain() {
+		AIBridge.onBossSlain(); //[nokpixel-ai-watcher] 최종 목표 달성 판정 (A-6-4)
 		if (Dungeon.hero.isAlive()) {
 			Banner bossSlain = new Banner( BannerSprites.get( BannerSprites.Type.BOSS_SLAIN ) );
 			bossSlain.show( 0xFFFFFF, 0.3f, 5f );

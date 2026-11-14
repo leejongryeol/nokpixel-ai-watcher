@@ -69,7 +69,8 @@ STEPS_LIMIT = 500  # 판단 추가로 늘릴 수 있는 최대 판단 합계 (we
 # 판이 끝난 이유 (config.json의 ended_reason)
 END_REASONS = {"died": "캐릭터가 죽음", "won": "승리", "quit": "게임 메뉴에서 타이틀로 나감",
                "game_closed": "게임이 꺼짐", "lost_game": "게임 신호가 끊김",
-               "max_steps": "정해진 판단 횟수를 다 씀", "stopped": "관찰자가 중지함", "error": "오류로 멈춤"}
+               "max_steps": "정해진 판단 횟수를 다 씀", "stopped": "관찰자가 중지함", "error": "오류로 멈춤",
+               "goal_reached": "최종 목표 달성"}
 
 MODELS = {  # price: 100만 토큰당 (입력, 출력) 달러
     "claude-haiku-4-5-20251001": {"name": "Haiku 4.5", "provider": "anthropic", "price": (1.0, 5.0)},
@@ -97,6 +98,19 @@ def key_env(model):
 # 최종 목표 기본값. AI 설정에서 바꾸지 않은 판은 아래 문구가 글자 그대로 들어간다 (지난 판과 비교)
 DEFAULT_GOAL = "지하 5층의 보스를 처치하는 것"
 DEFAULT_GOAL_SHORT = "5층 보스 처치"
+# 최종 목표 단계 (A-6-4, 게임의 AI 설정에서 고름). (AI에게 주는 문장, 짧은 이름). 보스 이름은 게임 화면의 한국어 이름 그대로.
+# 1단계 문장은 11/14 전 기본 목표(DEFAULT_GOAL)와 "구" 한 단어가 다르다 (config.json의 goal_stage로 구분)
+GOAL_STAGES = [
+    ("문을 열고 통과하는 것", "문 통과 (시험용)"),
+    ("지하 5층의 보스 구를 처치하는 것", "5층 보스 구"),
+    ("지하 10층의 보스 텐구 암살자를 처치하는 것", "10층 보스 텐구 암살자"),
+    ("지하 15층의 보스 DM-300을 처치하는 것", "15층 보스 DM-300"),
+    ("지하 20층의 보스 드워프 제왕을 처치하는 것", "20층 보스 드워프 제왕"),
+    ("지하 25층의 보스 요그제바를 처치하는 것", "25층 보스 요그제바"),
+    ("게임의 엔딩을 보는 것", "엔딩"),
+]
+GOAL_STAGE_DEFAULT = 1
+GOAL_STAGE_LAST = len(GOAL_STAGES) - 1
 
 SYSTEM_PROMPT = """너는 던전 탐험 게임을 하고 있다. 매번 게임 화면 이미지와 최근 기록이 주어진다.
 
@@ -667,6 +681,9 @@ class Agent:
         }
         if game_run:  # 게임의 AI 설정에서 시작한 판: 직업·제약은 AI 입력 [이번 판]에도 넣는다. 시드는 기록에만 남긴다
             self.config.update(game_run, started_from="game")
+            if isinstance(game_run.get("goal_stage"), int):  # 최종 목표 단계 (A-6-4). 문장은 기존 final_goal 경로로 AI 입력에 들어간다
+                stage = game_run["goal_stage"]
+                self.config.update(goal_stage_now=stage, final_goal=GOAL_STAGES[stage][0], goals_reached=[])
         # AI가 받은 정보: 게임에서 시작한 판은 화면 + 게임 데이터, mvp.py·옛 설정 화면 판은 화면만 (이 칸이 없는 옛 기록은 screen)
         self.config["ai_input"] = "screen_data" if game_run else "screen"
         if self.config["guide"]:  # 어떤 공략 문서로 돌린 판인지
@@ -707,6 +724,9 @@ class Agent:
         self.milestones = []  # [{"id", "label", "points", "step", "at", "depth"}]
         self._record_base = None  # 첫 상태의 record (늘어났는지 비교)
         self._record_prev = None  # 직전 상태의 record
+        # 최종 목표 달성 (A-6-4)
+        self._goal_notice_from = []  # 다음 목표로 넘어갔지만 아직 AI에게 알리지 않은 이전 목표 문장
+        self._title = None  # 끝내기로 판을 끝낸 뒤 게임을 타이틀로 보내기: None → wait(마지막 화면 찍는 중) → ready → sent
         # 세 창 관찰 화면용 (기록·AI 입력에는 들어가지 않는다)
         self.phase = "ready"  # ready → capture → thinking → acting → (typing) … → (limit) → done
         self.game = None
@@ -897,8 +917,61 @@ class Agent:
             if isinstance(log, list):
                 self._pending_log = (self._pending_log + [line for line in log if isinstance(line, dict)])[-GAME_LOG_LINES:]
             depth = (data["ai"].get("hero") or {}).get("depth")
-            self._judge_milestones(data["record"], depth if isinstance(depth, int) else None)
+            depth = depth if isinstance(depth, int) else None
+            self._judge_milestones(data["record"], depth)
+            self._judge_goal(data["record"], depth)
         return True
+
+    def game_won(self, depth):
+        """⑥ won: 지금 단계가 6(엔딩)이면 최종 목표 달성으로 기록한다."""
+        with self._lock:
+            self._judge_goal({}, depth, won=True)
+
+    def _judge_goal(self, record, depth, won=False):
+        """지금 최종 목표 단계를 이뤘는지 본다 (self._lock 안에서 부른다). 0: 문 칸에 처음 들어섬, 1~5: 그 층 보스 처치, 6: 승리.
+        이뤘으면 goals_reached에 남기고, 다음 목표로(next)면 단계를 올리고 다음 판단에 알림을 한 번 준다. 끝내기(end)·6단계면 판을 끝낸다."""
+        if "goal_stage_now" not in self.config or self.end_reason:
+            return
+        bosses = record.get("bosses_slain") if isinstance(record.get("bosses_slain"), list) else []
+        while True:
+            stage = self.config["goal_stage_now"]
+            if stage == 0:
+                hit = record.get("door_passed") is True
+            elif stage < GOAL_STAGE_LAST:
+                hit = stage * 5 in bosses
+            else:
+                hit = won
+            if not hit:
+                return
+            goal = GOAL_STAGES[stage][0]
+            self.config["goals_reached"].append({"stage": stage, "goal": goal, "step": self.step,
+                                                 "at": datetime.now().isoformat(timespec="seconds"), "depth": depth})
+            if self.config.get("on_goal") == "next" and stage < GOAL_STAGE_LAST:
+                self._goal_notice_from.append(goal)
+                self.config.update(goal_stage_now=stage + 1, final_goal=GOAL_STAGES[stage + 1][0])
+                self._save_config()
+                continue  # 바로 다음 단계도 이미 이뤘는지 본다
+            self._save_config()
+            if not won:  # 엔딩은 게임이 이미 엔딩 화면으로 가므로 타이틀로 보내지 않는다
+                self._title = "wait"
+            self.end_game("goal_reached", depth)
+            return
+
+    def take_goal_notice(self):
+        """다음 목표로 넘어간 뒤 첫 판단에 한 번 주는 알림. 없으면 ("", [])."""
+        with self._lock:
+            done, self._goal_notice_from = self._goal_notice_from, []
+            if not done:
+                return "", []
+            return f"최종 목표 달성: {', '.join(done)}. 새 최종 목표: {self.config['final_goal']}.", done
+
+    def title_signal(self):
+        """⑦ 응답용: 끝내기로 끝난 판을 타이틀로 보낼 차례인지. wait(아직) / go(이번 한 번) / None(해당 없음)."""
+        with self._lock:
+            if self._title == "ready":
+                self._title = "sent"
+                return "go"
+            return "wait" if self._title == "wait" else None
 
     def _judge_milestones(self, record, depth):
         """상태의 record로 이정표를 판정한다. 처음 맞을 때만 milestones.json에 더한다 (한 판에 한 번)."""
@@ -999,6 +1072,7 @@ class Agent:
             if not self.config["demo"]:
                 client = LLM(self.config["model"])
             system = self.system_prompt()
+            system_goal = self.config.get("final_goal")
 
             step = 1
             while True:
@@ -1018,6 +1092,10 @@ class Agent:
                 self.step = step
                 self.phase = "capture"
                 game_data = self._take_game_data()  # 화면을 찍기 직전의 게임 데이터 (게임에서 시작한 판만)
+                if game_data is not None:  # 최종 목표가 다음 단계로 바뀌었으면 알림을 한 번 주고 규칙도 새 목표로 (A-6-4)
+                    game_data["goal_notice"], game_data["goal_notice_from"] = self.take_goal_notice()
+                    if self.config.get("final_goal") != system_goal:
+                        system, system_goal = self.system_prompt(), self.config.get("final_goal")
                 image = game.capture()
                 if step == 1:  # 실제로 찍은 게임 창 크기를 기록에 남긴다
                     self._record_display(game)
@@ -1070,6 +1148,9 @@ class Agent:
             # 게임 화면이 아닌 곳(타이틀, 꺼진 게임)은 찍지 않는다
             if game is not None and not self.config["demo"] and self.end_reason not in ("quit", "game_closed", "lost_game"):
                 image = self._capture_final(game) or image
+        if self._title == "wait":  # 마지막 화면을 찍었으니 게임을 타이틀로 보낸다 (다음 ⑦ 응답)
+            self._title = "ready"
+        if self.entries and not self.config["dry_run"]:
             self._finish_with_lessons(client, final_status, image)
         self.status = final_status
 
@@ -1175,6 +1256,8 @@ class Agent:
             self._hints = hints + self._hints
             if game_data and game_data.get("log"):
                 self._pending_log = (game_data["log"] + self._pending_log)[-GAME_LOG_LINES:]
+            if game_data and game_data.get("goal_notice_from"):  # 목표 달성 알림도 다음 판단에 다시
+                self._goal_notice_from = game_data["goal_notice_from"] + self._goal_notice_from
         if self._pause is not None:
             self._pause["discarded_cost_usd"] += cost
 
@@ -1237,6 +1320,8 @@ class Agent:
                     entry["game_data_skipped"] = game_data["skipped"]
                 if game_data.get("same_wait"):  # 새 상태가 없었지만 살아 있음 신호로 같은 대기임을 확인하고 쓴 상태
                     entry["state_same_wait"] = True
+                if game_data.get("goal_notice"):  # 이 판단에 준 최종 목표 달성 알림 (A-6-4)
+                    entry["goal_notice"] = game_data["goal_notice"]
             self.entries.append(entry)
             self.total_cost += cost
             self.total_tokens += usage["input_tokens"] + usage["output_tokens"]
@@ -1294,6 +1379,8 @@ class Agent:
         else:
             history = "- (처음 시작)"
         text = f"[최근 기록]\n{history}\n\n[현재 중간 목표] {self.goal or '(아직 없음)'}"
+        if game_data is not None and game_data.get("goal_notice"):  # 최종 목표가 바뀐 첫 판단에만 맨 앞에
+            text = game_data["goal_notice"] + "\n\n" + text
         if self.memo:
             text += "\n\n[기억 메모]\n" + "\n".join(f"- {m['id']} (판단 {m['step']}에 적음): {m['text']}" for m in self.memo)
         if game_data is not None:

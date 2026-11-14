@@ -27,7 +27,8 @@ from flask import Flask, abort, jsonify, redirect, request, send_from_directory
 
 import agent as agent_module
 import window_layout
-from agent import (MODELS, PROVIDERS, DEFAULT_MODEL, LOGS_DIR, STATES_DIR, STATE_MAX_BYTES, Agent, list_runs,
+from agent import (MODELS, PROVIDERS, DEFAULT_MODEL, GOAL_STAGE_DEFAULT, GOAL_STAGE_LAST, LOGS_DIR, STATES_DIR,
+                   STATE_MAX_BYTES, Agent, list_runs,
                    load_lessons, load_run, summarize_run)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -287,7 +288,8 @@ def bridge_run():
         game_run = {
             "hero_class": clean_id(data.get("hero_class"), 20),
             "hero_title": clean_name(data.get("hero_title"), 20),
-            "final_goal": clean_name(data.get("final_goal"), 100),  # 비어 있으면 기본 목표
+            "goal_stage": goal_stage(data.get("goal_stage")),  # 최종 목표 단계 0~6 (A-6-4). 문장은 agent.py GOAL_STAGES
+            "on_goal": "next" if data.get("on_goal") == "next" else "end",  # 달성하면: 다음 목표로 / 끝내기(기본)
             "challenges": challenges,
             "challenge_names": [clean_id(n, 40) for n in names][:20] if isinstance(names, list) else [],
             "challenge_titles": [t for t in (clean_name(n, 40) for n in titles) if t][:20] if isinstance(titles, list) else [],
@@ -328,6 +330,12 @@ def bridge_arrived():
     return jsonify({"ok": True})
 
 
+def goal_stage(value):
+    """④의 goal_stage: 0~6 정수만. 그 밖은 기본(1: 5층 보스)."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= GOAL_STAGE_LAST \
+        else GOAL_STAGE_DEFAULT
+
+
 def running_agent(run_id):
     a = current()
     return a if a and a.status == "running" and run_id == a.run_id else None
@@ -343,8 +351,15 @@ def int_or_none(value):
 @app.post("/api/bridge/heartbeat")
 @bridge_only
 def bridge_heartbeat():
-    """⑦ 게임이 AI 판 동안 1초마다 보내는 살아 있음 신호. ok가 false면 게임은 신호를 멈춘다."""
+    """⑦ 게임이 AI 판 동안 1초마다 보내는 살아 있음 신호. ok가 false면 게임은 신호를 멈춘다.
+    goto_title이 참이면 게임은 타이틀 화면으로 간다 (최종 목표를 이뤄 끝내기로 끝난 판, A-6-4)."""
     data = body()
+    a = current()
+    title = a.title_signal() if a and data.get("run_id") == a.run_id else None
+    if title == "wait":  # 최종 목표를 이뤄 끝낸 판: 마지막 화면을 찍는 동안 신호를 유지시킨다
+        return jsonify({"ok": True})
+    if title == "go":  # 이제 게임을 타이틀로 보낸다 (게임 메뉴의 [타이틀로]와 같은 처리, A-6-4)
+        return jsonify({"ok": False, "reason": "goal_reached", "goto_title": True})
     a = running_agent(data.get("run_id"))
     if not a:
         return jsonify({"ok": False, "reason": "not_running"}), 409
@@ -381,6 +396,8 @@ def bridge_ended():
     a = running_agent(data.get("run_id"))
     if not a:
         return jsonify({"ok": False, "reason": "not_running"}), 409
+    if reason == "won":  # 6단계(엔딩) 목표면 최종 목표 달성으로 끝난다
+        a.game_won(int_or_none(data.get("depth")))
     a.end_game(reason, int_or_none(data.get("depth")))
     return jsonify({"ok": True})
 

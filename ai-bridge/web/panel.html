@@ -212,7 +212,14 @@ $("hintform").addEventListener("submit", async (event) => {
 
 // ----- 화면 갱신 -----
 const END_LABEL = { died: "사망으로 끝남", won: "승리", quit: "타이틀로 나가서 끝남", game_closed: "게임이 꺼져서 끝남",
-  lost_game: "게임 신호가 끊겨서 끝남", max_steps: "최대 판단 도달", stopped: "중지됨", error: "멈춤" };
+  lost_game: "게임 신호가 끊겨서 끝남", max_steps: "최대 판단 도달", stopped: "중지됨", error: "멈춤",
+  goal_reached: "최종 목표 달성으로 끝남" };
+// 최종 목표 줄: 단계가 있는 판(A-6-4)은 "N단계 · 문장"과 이룬 단계. 옛 판은 적은 목표나 기본 목표
+function goalText(c) {
+  if (typeof c.goal_stage_now !== "number") return c.final_goal || '지하 5층 보스 "구(Goo)" 처치';
+  const reached = (c.goals_reached || []).map(g => `${g.stage}단계(판단 ${g.step})`);
+  return `${c.goal_stage_now}단계 · ${c.final_goal}` + (reached.length ? ` · 달성: ${reached.join(", ")}` : "");
+}
 function light(s) {
   if (s.status !== "running") {
     const reason = s.config.ended_reason;
@@ -280,7 +287,7 @@ function renderNow(s) {
   $("note").classList.toggle("hidden", !notes.length);
 
   renderGame(s.game);
-  $("final-goal").textContent = c.final_goal || '지하 5층 보스 "구(Goo)" 처치';  // 게임의 AI 설정에서 바꾼 목표
+  $("final-goal").textContent = goalText(c);
   $("goal").textContent = s.goal || "—";
   const latest = entries[entries.length - 1];
   if (!latest) return;

@@ -348,7 +348,8 @@ def bridge_heartbeat():
     a = running_agent(data.get("run_id"))
     if not a:
         return jsonify({"ok": False, "reason": "not_running"}), 409
-    a.heartbeat(data.get("alive") is not False, int_or_none(data.get("depth")))
+    a.heartbeat(data.get("alive") is not False, int_or_none(data.get("depth")),
+                int_or_none(data.get("state_seq")), data.get("waiting") is True)
     return jsonify({"ok": True})
 
 

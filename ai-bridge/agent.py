@@ -126,6 +126,24 @@ SYSTEM_PROMPT = """너는 던전 탐험 게임을 하고 있다. 매번 게임 �
 - 화면의 버튼, 아이템, 칸을 직접 누를 때는 click 도구를 쓴다 (이미지 좌표 기준)
 - 키 하나를 누를 때마다 한 턴이 지나고, 그동안 적도 움직인다"""
 
+# 게임에서 시작한 판에만 규칙 뒤에 붙인다: 판단마다 함께 주는 [게임 정보]·[지도] 읽는 법 (docs/project/game-state.md 1-3, 1-4)
+GAME_DATA_RULES = """[게임 정보 읽는 법]
+- 판단마다 화면과 함께 [게임 정보]와 [지도] 글이 주어진다. 화면과 같은 순간의 게임 데이터이고, 화면에서 알 수 있는 것만 담겨 있다. 없는 판단도 있다.
+- 좌표는 (x,y). x는 오른쪽, y는 아래쪽으로 커진다 (w로 가면 y가 1 줄고, d로 가면 x가 1 는다). 지도 위 숫자는 x, 왼쪽 숫자는 y.
+- 기호: @ 나, 1~9 지금 보이는 적(목록 번호, 10번째부터 M), # 벽, . 바닥, + 닫힌 문, ' 열린 문, L 잠긴 문, < 올라가는 계단, > 내려가는 계단, ~ 물, , 풀, " 높은 풀, : 낭떠러지, ^ 함정, T 조각상 등 막힌 것, 0 우물·연금 솥, * 바닥 아이템, ? 그 밖의 지형
+- 빈칸은 아직 본 적 없는 곳이다. 지형은 본 그대로 기억한 모습이고, 적은 지금 보이는 것만 있다.
+- [게임 정보]·[지도]에서 본 것도 basis는 "화면"으로 적는다."""
+GAME_DATA_NONE = "[게임 정보] 이번 판단에는 없음 (화면만 보고 판단)"
+GAME_LOG_LINES = 8  # [게임 정보]의 최근 메시지 최대 줄 수 (게임의 AIBridge.LOG_LINES와 같음)
+SAME_WAIT_TIMEOUT = 1.5  # 행동 뒤 새 상태가 없을 때, "같은 대기 그대로"인지 알려 줄 살아 있음 신호(1초마다)를 기다리는 최대 시간(초)
+BEAT_MARGIN = 0.25  # 키를 누른 뒤 이 시간(초)이 지나 받은 살아 있음 신호만 "같은 대기 그대로"의 근거로 쓴다
+STATE_REASONS = {"start": "판 시작", "done": "행동 끝남", "level_changed": "층 이동", "interrupted_enemy": "새 적이 보임",
+                 "damaged": "체력이 줄어듦", "damaged_heavy": "체력이 크게 줄어듦", "interrupted": "이동이 끊김",
+                 "window": "창이 떠 있음"}
+HUNGER_NAMES = {"none": "없음", "hungry": "배고픔", "starving": "굶주림"}
+LOG_KIND_NAMES = {"good": "[좋음] ", "bad": "[나쁨] ", "warning": "[경고] ", "highlight": "[강조] ", "normal": ""}
+EQUIP_SLOTS = [("weapon", "무기"), ("armor", "갑옷"), ("artifact", "유물"), ("misc", "장신구"), ("ring", "반지")]
+
 ALLOWED_KEYS = [
     "w", "a", "s", "d", "num7", "num9", "num1", "num3",
     "space", "z", "e", "f", "esc", "enter",
@@ -217,6 +235,82 @@ def describe_action(action):
     if action["tool"] == "click":
         return f"클릭 ({action['input'].get('x')}, {action['input'].get('y')})"
     return action["tool"]
+
+
+def _xy(pos):
+    return f"({pos[0]},{pos[1]})" if isinstance(pos, list) and len(pos) == 2 else "(?)"
+
+
+def _cursed(obj):
+    return " (저주받음)" if obj.get("cursed") else ""
+
+
+def map_text(m):
+    """문자 지도 글: 위에 x 눈금(5의 배수), 왼쪽에 y. 안 본 칸은 상태에 공백으로 온다 (game-state.md 1-4)."""
+    rows = [str(r) for r in (m or {}).get("rows") or []]
+    origin = (m or {}).get("origin") or [0, 0]
+    if not rows or len(origin) != 2:
+        return "[지도] 본 칸 없음"
+    ox, oy = origin
+    width = max(int((m or {}).get("width") or 0), max(len(r) for r in rows))
+    yw = len(str(oy + len(rows) - 1))
+    scale, free = [" "] * width, 0  # free: 다음 눈금을 쓸 수 있는 가장 왼쪽 칸 (눈금끼리 붙지 않게)
+    for x in range(ox, ox + width):
+        label, i = str(x), x - ox
+        if x % 5 == 0 and i >= free and i + len(label) <= width:
+            scale[i:i + len(label)] = label
+            free = i + len(label) + 1
+    lines = ["[지도] 본 칸만. 좌표는 (x,y)", " " * (yw + 2) + "".join(scale).rstrip()]
+    lines += [f"{oy + n:>{yw}}  {row}" for n, row in enumerate(rows)]
+    return "\n".join(lines)
+
+
+def game_data_text(ai, reasons, log_lines):
+    """⑧ 상태의 ai 칸 → AI 입력의 [게임 정보]·[지도] 글 (game-state.md 1-3). record·seq·run_id는 쓰지 않는다."""
+    hero = ai.get("hero") or {}
+    why = " · ".join(STATE_REASONS.get(r, str(r)) for r in reasons or []) or "알 수 없음"
+    lines = [f"[게임 정보] (이번에 멈춘 이유: {why})"]
+    buffs = ", ".join(str(b) for b in hero.get("buffs") or []) or "없음"
+    lines.append(f"나: {hero.get('depth', '?')}층 · 체력 {hero.get('hp', '?')}/{hero.get('ht', '?')} · "
+                 f"레벨 {hero.get('lvl', '?')} (경험치 {hero.get('exp', '?')}/{hero.get('exp_next', '?')}) · "
+                 f"힘 {hero.get('str', '?')} · 금화 {hero.get('gold', '?')} · "
+                 f"배고픔 {HUNGER_NAMES.get(hero.get('hunger'), '?')} · 상태이상 {buffs}")
+    lines.append(f"위치 {_xy(hero.get('pos'))}, 발밑: {hero.get('standing_on', '?')}")
+
+    mobs = []
+    for m in ai.get("mobs") or []:
+        side = {"ally": " (아군)", "neutral": " (중립)"}.get(m.get("side"), "")
+        mobs.append(f"{m.get('mark', '?')} {m.get('name', '?')}{side} {_xy(m.get('pos'))} "
+                    f"{'잠듦' if m.get('asleep') else '깨어 있음'}, 체력 {m.get('hp', '?')}")
+    lines.append("보이는 적: " + (" · ".join(mobs) or "없음"))
+    heaps = [f"{h.get('name', '?')} {_xy(h.get('pos'))}" + ("" if h.get("visible_now") else " 지금 안 보임")
+             for h in ai.get("heaps") or []]
+    lines.append("아이템: " + (" · ".join(heaps) or "없음"))
+
+    # 계단: 게임 이름과 올라감/내려감만. 우리가 만든 설명은 붙이지 않는다
+    stairs, has_down = [], False
+    for t in ai.get("transitions") or []:
+        down = t.get("kind") == "down"
+        has_down = has_down or down
+        stairs.append(f"{'내려가는 계단 >' if down else '올라가는 계단 <'} {_xy(t.get('pos'))} {t.get('name', '?')}")
+    if not has_down:
+        stairs.append("본 칸 중 내려가는 계단: 없음")
+    lines.append("계단: " + " · ".join(stairs))
+    traps = " · ".join(f"{t.get('name', '?')} {_xy(t.get('pos'))}" for t in ai.get("traps") or []) or "없음"
+    plants = " · ".join(f"{p.get('name', '?')} {_xy(p.get('pos'))}" for p in ai.get("plants") or []) or "없음"
+    lines.append(f"함정: {traps} · 식물: {plants}")
+
+    bag = ai.get("bag") or {}
+    equipped = bag.get("equipped") or {}
+    worn = ", ".join(f"{label} {equipped[slot].get('name', '?')}{_cursed(equipped[slot])}"
+                     for slot, label in EQUIP_SLOTS if isinstance(equipped.get(slot), dict)) or "없음"
+    items = [f"{i.get('id', '?')} {i.get('name', '?')}{_cursed(i)} ({'·'.join(str(a) for a in i.get('actions') or [])})"
+             for i in bag.get("items") or []]
+    lines.append("가방: [장착] " + worn + "".join(" / " + i for i in items))
+    messages = " / ".join(LOG_KIND_NAMES.get(l.get("kind"), "") + str(l.get("text", ""))
+                          for l in log_lines[-GAME_LOG_LINES:] if isinstance(l, dict)) or "없음"
+    lines.append("최근 메시지: " + messages)
+    return "\n".join(lines) + "\n\n" + map_text(ai.get("map"))
 
 
 def to_base64_png(image):
@@ -335,6 +429,7 @@ class WindowsGame:
         self.stop_event = None  # 에이전트의 중지 신호 (게임 창을 기다리는 중에도 중지할 수 있게)
         self.waiting_focus = False  # 게임 창을 맨 앞으로 가져오지 못해 기다리는 중
         self.guard = None  # 키·클릭 하나마다 먼저 부르는 확인 (판이 끝났으면 StopRequested)
+        self.last_input_at = 0.0  # 마지막으로 키·클릭을 실제로 보낸 시각 (이 뒤에 받은 상태가 행동 뒤의 상태)
 
     def is_front(self):
         return self.user32.GetForegroundWindow() == self.hwnd
@@ -446,6 +541,7 @@ class WindowsGame:
                     self._require_focus()
                     if self.guard:  # 게임 창을 기다리는 동안 멈췄을 수 있다
                         self.guard()
+                    self.last_input_at = time.time()
                     self.pyautogui.press(key)
                     time.sleep(0.15)
         elif action["tool"] == "click":
@@ -457,6 +553,7 @@ class WindowsGame:
             left, top, scale_x, scale_y = self.geometry
             x = int(left + action["input"]["x"] * scale_x)
             y = int(top + action["input"]["y"] * scale_y)
+            self.last_input_at = time.time()
             self.pyautogui.click(x, y)
 
 
@@ -500,6 +597,7 @@ class DemoGame:
         self.window_size = None
         self.guard = None
         self.pressed = 0  # 시험용: 실제로 "누른" 키 수
+        self.last_input_at = 0.0
 
     def capture(self):
         width, height = AI_IMAGE_SIZE
@@ -520,6 +618,7 @@ class DemoGame:
         for _ in (action or {}).get("input", {}).get("keys", [])[:3]:
             if self.guard:
                 self.guard()
+            self.last_input_at = time.time()
             self.pressed += 1
 
 
@@ -583,8 +682,12 @@ class Agent:
         self._hero_alive = True
         self.depth = None
         self.end_reason = ""
-        # 게임 데이터(⑧ 상태)와 진행도 이정표. 기록에만 쓰고 AI 입력에는 넣지 않는다
+        # 게임 데이터(⑧ 상태)와 진행도 이정표. 게임에서 시작한 판은 ai 칸을 AI 입력 [게임 정보]·[지도]로도 쓴다 (record는 기록에만)
         self.last_state_seq = None
+        self._last_state = None  # 가장 최근 상태 (seq, ai 칸, reasons, 받은 시각). record는 두지 않는다
+        self._pending_log = []  # 지난 판단 뒤 상태들에 실려 온 게임 메시지 (게임은 상태마다 그 사이 메시지만 보낸다)
+        self._input_done_at = 0.0  # AI가 마지막으로 키·클릭을 보낸 시각. 이보다 먼저 받은 상태는 지난 대기의 것일 수 있다
+        self._beat = (0.0, None, False)  # 마지막 살아 있음 신호 (받은 시각, 게임이 보낸 마지막 상태 번호, 그 대기 그대로인지)
         self.milestones = []  # [{"id", "label", "points", "step", "at", "depth"}]
         self._record_base = None  # 첫 상태의 record (늘어났는지 비교)
         self._record_prev = None  # 직전 상태의 record
@@ -660,10 +763,11 @@ class Agent:
             "during": "limit" if self.phase == "limit" else "paused" if self._paused.is_set() else "running"})
         self._save_config()
 
-    def heartbeat(self, alive, depth):
-        """⑦ 게임이 1초마다 보내는 살아 있음 신호."""
+    def heartbeat(self, alive, depth, state_seq=None, waiting=False):
+        """⑦ 게임이 1초마다 보내는 살아 있음 신호. state_seq·waiting: 마지막으로 보낸 상태 번호와 그 대기 그대로인지 (A-6-3)."""
         self._heartbeat_at = time.time()
         self.depth = depth
+        self._beat = (self._heartbeat_at, state_seq, bool(waiting))
         if not alive:
             self._hero_alive = False
             self.end_game("died", depth)
@@ -759,6 +863,11 @@ class Agent:
             with open(os.path.join(self.run_dir, STATES_DIR, f"{seq:05d}.json"), "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False)
             self.last_state_seq = seq
+            reasons = data.get("reasons") if isinstance(data.get("reasons"), list) else []
+            self._last_state = (seq, data["ai"], reasons, time.time())
+            log = data["ai"].get("log")
+            if isinstance(log, list):
+                self._pending_log = (self._pending_log + [line for line in log if isinstance(line, dict)])[-GAME_LOG_LINES:]
             depth = (data["ai"].get("hero") or {}).get("depth")
             self._judge_milestones(data["record"], depth if isinstance(depth, int) else None)
         return True
@@ -827,6 +936,8 @@ class Agent:
         goal = self.custom_goal()
         if goal:  # 기본 목표 문장만 바꾼다
             system = system.replace(f"[최종 목표] {DEFAULT_GOAL}.", f"[최종 목표] {goal}.")
+        if self._watch_game:  # 게임에서 시작한 판은 판단마다 [게임 정보]·[지도]도 받는다
+            system += "\n\n" + GAME_DATA_RULES
         if self.config.get("started_from") == "game":  # 화면에 보이는 직업·제약 이름만. 시드는 넣지 않는다
             system += "\n\n[이번 판]\n직업: " + (self.config.get("hero_title") or self.config.get("hero_class") or "?")
             if self.config.get("challenge_titles"):
@@ -879,6 +990,7 @@ class Agent:
                 self.step = step
                 self.phase = "capture"
                 state_seq = self.last_state_seq  # 화면을 찍기 직전에 받은 게임 상태 (기록에만 남김)
+                game_data = self._take_game_data()  # 화면을 찍기 직전의 게임 데이터 (게임에서 시작한 판만)
                 image = game.capture()
                 if step == 1:  # 실제로 찍은 게임 창 크기를 기록에 남긴다
                     self._record_display(game)
@@ -893,11 +1005,11 @@ class Agent:
                 if self.config["demo"]:
                     thought, action, usage = demo_decision(step)
                 else:
-                    thought, action, usage = self._ask(client, system, image, hints, checkpoint)
+                    thought, action, usage = self._ask(client, system, image, hints, checkpoint, game_data)
 
                 if self._paused.is_set() and not self._stop.is_set():
                     # 생각하는 동안 일시정지: 사람이 조작해 화면이 바뀌므로 이 판단은 버리고, 재개 뒤 같은 번호로 다시 생각한다
-                    self._discard(usage, hints)
+                    self._discard(usage, hints, game_data)
                     continue
                 self._record(step, image_name, thought, action, usage, hints, checkpoint, state_seq)
                 if self._stop.is_set():  # 생각하는 동안 판이 끝났으면 행동하지 않는다
@@ -909,6 +1021,9 @@ class Agent:
                         game.execute(action)
                     except PauseRequested:  # 남은 키는 보내지 않고, 재개 뒤 다음 판단으로 넘어간다
                         pass
+                    # 마지막 키·클릭을 누른 순간. 이 뒤에 받은 상태만 다음 판단의 게임 데이터로 쓴다
+                    # (키를 다 보낸 뒤 시각으로 재면, 그 사이 이미 도착한 행동 뒤 상태를 지난 것으로 잘못 본다: 11/14 첫 실제 판)
+                    self._input_done_at = max(self._input_done_at, getattr(game, "last_input_at", 0.0))
                 time.sleep(WAIT_AFTER_ACTION)
                 step += 1
         except StopRequested:
@@ -1022,15 +1137,17 @@ class Agent:
         if self.input_lock is not None:
             self.input_lock.start(game.hwnd)
 
-    def _discard(self, usage, hints):
+    def _discard(self, usage, hints, game_data=None):
         """일시정지로 버린 판단: 기록(log.jsonl)에는 남기지 않고, 든 비용만 합계와 config.json의 pauses에 더한다.
-        받은 힌트는 다음 판단에 다시 준다."""
+        받은 힌트와 게임 메시지는 다음 판단에 다시 준다."""
         price_in, price_out = MODELS[self.config["model"]]["price"]
         cost = (usage["input_tokens"] * price_in + usage["output_tokens"] * price_out) / 1_000_000
         with self._lock:
             self.total_cost += cost
             self.total_tokens += usage["input_tokens"] + usage["output_tokens"]
             self._hints = hints + self._hints
+            if game_data and game_data.get("log"):
+                self._pending_log = (game_data["log"] + self._pending_log)[-GAME_LOG_LINES:]
         if self._pause is not None:
             self._pause["discarded_cost_usd"] += cost
 
@@ -1097,16 +1214,43 @@ class Agent:
         with open(os.path.join(self.run_dir, "log.jsonl"), "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    def _ask(self, client, system, image, hints, checkpoint):
+    def _take_game_data(self):
+        """판단 직전의 게임 데이터. 게임에서 시작한 판이 아니면 None.
+        쓰는 상태: AI가 마지막 키·클릭을 보낸 뒤 받은 상태, 또는 (벽에 부딪히기처럼 턴이 안 지나 새 상태가 없을 때)
+        키·클릭 뒤의 살아 있음 신호가 "그 상태의 대기 그대로"라고 알린 상태. 신호는 1초마다 오므로 최대 SAME_WAIT_TIMEOUT초 기다린다.
+        못 쓰면 글 없이 {"seq": None, "skipped": 이유}. 쓸 때는 지난 판단 뒤에 쌓인 게임 메시지도 가져가고 비운다."""
+        if not self._watch_game:
+            return None
+        deadline = time.time() + SAME_WAIT_TIMEOUT
+        while True:
+            with self._lock:
+                last, (beat_at, beat_seq, beat_waiting) = self._last_state, self._beat
+                if last is None:
+                    return {"seq": None, "text": "", "log": [], "skipped": {"reason": "no_state", "latest_seq": None}}
+                seq, ai, reasons, received_at = last
+                fresh = received_at > self._input_done_at
+                # 키를 누르기 직전에 만들어진 신호가 누른 뒤에 도착할 수 있어서, 누른 뒤 BEAT_MARGIN초가 지나 받은 신호만 믿는다
+                same_wait = (not fresh and beat_at > self._input_done_at + BEAT_MARGIN
+                             and beat_waiting and beat_seq == seq)
+                if fresh or same_wait:
+                    log, self._pending_log = self._pending_log, []
+                    return {"seq": seq, "text": game_data_text(ai, reasons, log), "log": log, "skipped": None,
+                            "same_wait": same_wait}
+            # 아직 행동 중이면(쉬기 등) 그 사이 새 상태가 올 수도 있으니 마감까지 기다린다
+            if time.time() >= deadline or self._stop.wait(0.1):
+                return {"seq": None, "text": "", "log": [], "skipped": {"reason": "stale", "latest_seq": seq}}
+
+    def _ask(self, client, system, image, hints, checkpoint, game_data=None):
         content = [
-            ("text", self._prompt_text(hints, checkpoint) + "\n\n[현재 게임 화면]"),
+            ("text", self._prompt_text(hints, checkpoint, game_data) + "\n\n[현재 게임 화면]"),
             ("image", image),
             ("text", "생각을 쓰고 도구로 행동해라."),
         ]
         return client.ask(content, 2048, system=system, tools=self.tools())
 
-    def _prompt_text(self, hints, checkpoint):
-        """판단 요청에 들어가는 글 부분 (최근 기록, 중간 목표, 기억 메모, 힌트, 큰 점검)."""
+    def _prompt_text(self, hints, checkpoint, game_data=None):
+        """판단 요청에 들어가는 글 부분 (최근 기록, 중간 목표, 기억 메모, 게임 정보·지도, 힌트, 큰 점검).
+        game_data가 None이면(mvp.py 판) 게임 정보 칸 없이 지금까지와 같은 글."""
         recent = self.entries[-(CHECKPOINT_LOG_SIZE if checkpoint else RECENT_LOG_SIZE):]
         # 생각만 하기 판에서 AI가 기록 속 행동을 실제로 했다고 믿지 않게 표시한다. 실제 조작 판의 형식은 그대로.
         mark = NOT_EXECUTED_MARK if self.config["dry_run"] else ""
@@ -1121,6 +1265,8 @@ class Agent:
         text = f"[최근 기록]\n{history}\n\n[현재 중간 목표] {self.goal or '(아직 없음)'}"
         if self.memo:
             text += "\n\n[기억 메모]\n" + "\n".join(f"- {m['id']} (판단 {m['step']}에 적음): {m['text']}" for m in self.memo)
+        if game_data is not None:
+            text += "\n\n" + (game_data["text"] or GAME_DATA_NONE)
         if hints:
             text += "\n\n[개발자 힌트]\n" + "\n".join(f"- {h}" for h in hints)
         if checkpoint:

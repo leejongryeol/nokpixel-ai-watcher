@@ -309,6 +309,10 @@ public class AIBridge {
 		body.addChild("run_id", new JsonValue(runId));
 		body.addChild("alive", new JsonValue(alive));
 		body.addChild("depth", new JsonValue(Dungeon.depth));
+		//마지막으로 보낸 상태 번호와, 주인공이 그 상태를 보낸 대기 그대로인지 (A-6-3).
+		//벽에 부딪히기처럼 턴이 안 지나는 입력 뒤에는 새 상태가 없으므로, Python은 이 값으로 마지막 상태가 아직 맞는지 안다
+		body.addChild("state_seq", new JsonValue(stateSeq));
+		body.addChild("waiting", new JsonValue(wasWaiting));
 		sinceHeartbeat = 0;
 		heartbeatInFlight = true;
 		post("/api/bridge/heartbeat", body, SHORT_TIMEOUT, new Listener() {

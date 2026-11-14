@@ -149,6 +149,20 @@ GAME_DATA_RULES = """[게임 정보 읽는 법]
 - [게임 정보]의 "주변 8칸"은 내 바로 옆 칸이 무엇인지와 그 칸으로 가는 키다. 지도와 같은 내용이니, 바로 옆 칸은 지도 글자를 세지 말고 이 줄로 확인한다.
 - [게임 정보]·[지도]에서 본 것도 basis는 "화면"으로 적는다."""
 GAME_DATA_NONE = "[게임 정보] 이번 판단에는 없음 (화면만 보고 판단)"
+# 게임 명령 (A-6-5, game-state.md 3장): 게임에서 시작한 판에만 규칙 [조작법] 끝에 붙이고 도구에 더한다
+COMMAND_RULES = """- 게임 명령 도구도 쓸 수 있다: move_to(x,y) 그 칸까지 가기, attack(x,y) 그 칸의 적 공격, pick_up(x,y, 비우면 발밑) 줍기·상자 열기, take_stairs(x,y) 계단 타기, rest(turn 한 턴 / full 체력이 찰 때까지) 쉬기, search 주변 탐색
+- 명령의 좌표는 [게임 정보]·[지도]의 좌표다. 가 본 적 없는 칸(지도의 빈칸)으로는 못 간다
+- move_to는 도착하거나 새 적이 보이면 멈춘다. 명령 한 번에 여러 턴이 지날 수 있다
+- 명령을 실행하지 못하면 다음 [게임 정보]에 이유가 나온다"""
+COMMAND_STATE_WAIT = 30  # 명령을 낸 뒤 새 상태(seq가 더 큼)를 기다리는 최대 시간(초). 긴 이동·쉬기
+COMMAND_SHOT_DELAY = 0.3  # 새 상태를 받은 뒤 화면을 찍기까지 (걷는 그림·숫자가 잦아들게)
+COMMAND_OUTCOMES = {  # 게임이 명령을 실행하지 않은 이유 (game-state.md 3-2)
+    "not_ready": "아직 움직이는 중", "window_open": "창이 떠 있음", "stale": "지난 화면 기준 명령",
+    "out_of_map": "층 밖 좌표", "unknown_cell": "가 본 적 없는 칸", "no_enemy": "그 칸에 보이는 적 없음",
+    "no_item": "그 칸에 아이템 없음", "no_stairs": "그 칸에 계단 없음",
+    "not_this_action": "그 칸을 누르면 다른 행동이 됨", "cannot_leave": "1층 입구로는 나갈 수 없음",
+    "dead": "주인공이 죽음", "bad_command": "모르는 명령", "error": "게임 오류",
+}
 # 게임 데이터 글 버전 (config.json의 game_data_version). 1: A-6-3 처음 (이 칸이 없는 기록) / 2: 주변 8칸 줄 더함 (11/14)
 GAME_DATA_VERSION = 2
 # 주변 8칸: (방향 이름, 키, dx, dy). 순서는 북쪽부터 시계 방향
@@ -163,7 +177,7 @@ SAME_WAIT_TIMEOUT = 1.5  # 행동 뒤 새 상태가 없을 때, "같은 대기 �
 BEAT_MARGIN = 0.25  # 키를 누른 뒤 이 시간(초)이 지나 받은 살아 있음 신호만 "같은 대기 그대로"의 근거로 쓴다
 STATE_REASONS = {"start": "판 시작", "done": "행동 끝남", "level_changed": "층 이동", "interrupted_enemy": "새 적이 보임",
                  "damaged": "체력이 줄어듦", "damaged_heavy": "체력이 크게 줄어듦", "interrupted": "이동이 끊김",
-                 "window": "창이 떠 있음"}
+                 "window": "창이 떠 있음", "rejected": "명령을 실행하지 않음"}
 HUNGER_NAMES = {"none": "없음", "hungry": "배고픔", "starving": "굶주림"}
 LOG_KIND_NAMES = {"good": "[좋음] ", "bad": "[나쁨] ", "warning": "[경고] ", "highlight": "[강조] ", "normal": ""}
 EQUIP_SLOTS = [("weapon", "무기"), ("armor", "갑옷"), ("artifact", "유물"), ("misc", "장신구"), ("ring", "반지")]
@@ -215,6 +229,25 @@ TOOLS = [
         },
     },
 ]
+
+
+def _command_tool(name, description, props, required):
+    return {"name": name, "description": description,
+            "input_schema": {"type": "object", "properties": {**props, **_COMMON_PROPS},
+                             "required": required + ["goal", "check_goal", "basis"]}}
+
+
+_XY = {"x": {"type": "integer", "description": "[지도]의 x 좌표"}, "y": {"type": "integer", "description": "[지도]의 y 좌표"}}
+COMMAND_TOOLS = [
+    _command_tool("move_to", "본 칸 (x,y)까지 걸어간다. 길은 게임이 찾는다. 도착하거나 새 적이 보이면 멈춘다.", _XY, ["x", "y"]),
+    _command_tool("attack", "(x,y) 칸의 보이는 적을 공격한다. 떨어져 있으면 다가가서 공격한다.", _XY, ["x", "y"]),
+    _command_tool("pick_up", "(x,y) 칸의 아이템을 줍거나 상자를 연다. 떨어져 있으면 걸어가서 줍는다. x,y를 비우면 발밑.", _XY, []),
+    _command_tool("take_stairs", "(x,y) 계단 칸으로 가서 계단을 탄다.", _XY, ["x", "y"]),
+    _command_tool("rest", "쉰다. turn: 한 턴, full: 체력이 찰 때까지 (무언가 나타나면 멈춤).",
+                  {"until": {"type": "string", "enum": ["turn", "full"]}}, ["until"]),
+    _command_tool("search", "주변의 숨겨진 문·함정을 탐색한다.", {}, []),
+]
+COMMAND_NAMES = {t["name"] for t in COMMAND_TOOLS}
 
 
 def load_guide():
@@ -270,7 +303,37 @@ def describe_action(action):
         return "키 " + " → ".join(action["input"].get("keys", []))
     if action["tool"] == "click":
         return f"클릭 ({action['input'].get('x')}, {action['input'].get('y')})"
+    if action["tool"] in COMMAND_NAMES:
+        return command_text(action["tool"], action["input"])
     return action["tool"]
+
+
+def command_text(name, args):
+    """명령 한 줄 (예: move_to(20,9), pick_up(발밑), rest(full))."""
+    args = args or {}
+    if name == "rest":
+        return f"rest({args.get('until', 'turn')})"
+    if name == "search":
+        return "search"
+    if name == "pick_up" and args.get("x") is None and args.get("y") is None:
+        return "pick_up(발밑)"
+    return f"{name}({args.get('x')},{args.get('y')})"
+
+
+def command_result(last_command, reasons, hero_pos):
+    """명령 결과 한 줄 (기록 창·리포트·[최근 기록]·[게임 정보]). 실행 안 했으면 이유, 했으면 끝난 모습."""
+    if not isinstance(last_command, dict):
+        return ""
+    outcome = last_command.get("outcome")
+    if outcome != "ok":
+        return f"실행 안 함 ({COMMAND_OUTCOMES.get(outcome, outcome)})"
+    args = last_command.get("args") or {}
+    reasons = [r for r in reasons or [] if r != "done"]
+    if last_command.get("name") == "move_to":
+        if hero_pos == [args.get("x"), args.get("y")]:
+            return "도착" + (f" ({STATE_REASONS.get(reasons[0], reasons[0])})" if reasons else "")
+        return "중간에 멈춤" + (f" ({STATE_REASONS.get(reasons[0], reasons[0])})" if reasons else " (갈 수 없거나 길이 막힘)")
+    return "실행함" + (f" ({STATE_REASONS.get(reasons[0], reasons[0])})" if reasons else "")
 
 
 def _xy(pos):
@@ -318,11 +381,15 @@ def around_text(m, pos):
     return "주변 8칸: " + " · ".join(parts)
 
 
-def game_data_text(ai, reasons, log_lines):
+def game_data_text(ai, reasons, log_lines, show_command=True):
     """⑧ 상태의 ai 칸 → AI 입력의 [게임 정보]·[지도] 글 (game-state.md 1-3). record·seq·run_id는 쓰지 않는다."""
     hero = ai.get("hero") or {}
     why = " · ".join(STATE_REASONS.get(r, str(r)) for r in reasons or []) or "알 수 없음"
     lines = [f"[게임 정보] (이번에 멈춘 이유: {why})"]
+    last_command = ai.get("last_command")
+    if show_command and isinstance(last_command, dict):  # 바로 앞 명령의 결과 (A-6-5. 같은 대기를 다시 쓸 때는 빼고)
+        lines.append(f"지난 명령: {command_text(last_command.get('name'), last_command.get('args'))} → "
+                     + command_result(last_command, reasons, hero.get("pos")))
     buffs = ", ".join(str(b) for b in hero.get("buffs") or []) or "없음"
     lines.append(f"나: {hero.get('depth', '?')}층 · 체력 {hero.get('hp', '?')}/{hero.get('ht', '?')} · "
                  f"레벨 {hero.get('lvl', '?')} (경험치 {hero.get('exp', '?')}/{hero.get('exp_next', '?')}) · "
@@ -716,6 +783,8 @@ class Agent:
         self.config["ai_input"] = "screen_data" if game_run else "screen"
         if game_run:  # 게임 데이터 글 버전 (이 칸이 없는 screen_data 기록은 1)
             self.config["game_data_version"] = GAME_DATA_VERSION
+        # 준 도구 묶음 (A-6-5). 게임에서 시작한 판은 키·클릭 + 게임 명령 6개. 이 칸이 없는 옛 기록은 keys_click
+        self.config["tool_set"] = "keys_click_commands" if game_run else "keys_click"
         if self.config["guide"]:  # 어떤 공략 문서로 돌린 판인지
             self.config["guide_version"] = guide_version()
         safe_player = "".join(c for c in self.config["player"] if c.isalnum() or c in "-_") or "player"
@@ -757,6 +826,9 @@ class Agent:
         # 최종 목표 달성 (A-6-4)
         self._goal_notice_from = []  # 다음 목표로 넘어갔지만 아직 AI에게 알리지 않은 이전 목표 문장
         self._title = None  # 끝내기로 판을 끝낸 뒤 게임을 타이틀로 보내기: None → wait(마지막 화면 찍는 중) → ready → sent
+        # 게임 명령 (A-6-5): ⑨로 게임이 가져갈 명령 {"seq", "name", "args"}. 가져가면 비운다
+        self._command = None
+        self._command_taken_at = 0.0
         # 세 창 관찰 화면용 (기록·AI 입력에는 들어가지 않는다)
         self.phase = "ready"  # ready → capture → thinking → acting → (typing) … → (limit) → done
         self.game = None
@@ -942,7 +1014,8 @@ class Agent:
                 json.dump(data, f, ensure_ascii=False)
             self.last_state_seq = seq
             reasons = data.get("reasons") if isinstance(data.get("reasons"), list) else []
-            self._last_state = (seq, data["ai"], reasons, time.time())
+            ai = dict(data["ai"], last_command=data.get("last_command"))  # 지난 명령 결과도 [게임 정보]에 쓴다 (A-6-5)
+            self._last_state = (seq, ai, reasons, time.time())
             log = data["ai"].get("log")
             if isinstance(log, list):
                 self._pending_log = (self._pending_log + [line for line in log if isinstance(line, dict)])[-GAME_LOG_LINES:]
@@ -986,6 +1059,67 @@ class Agent:
                 self._title = "wait"
             self.end_game("goal_reached", depth)
             return
+
+    def wants_commands(self):
+        """⑧ 응답의 want_command: 게임에서 시작한 판은 명령 도구를 쓰므로 게임이 ⑨로 묻게 한다."""
+        return self._watch_game
+
+    def take_command(self, seq):
+        """⑨ 게임이 묻는 명령. 일시정지·중지·한도 도달·판 끝 중에는 넘기지 않는다. 넘긴 명령은 지운다 (한 번만)."""
+        with self._lock:
+            if (self.status != "running" or self._stop.is_set() or self._paused.is_set()
+                    or self.phase == "limit" or self.end_reason or self._command is None):
+                return None
+            command, self._command = self._command, None
+            self._command_taken_at = time.time()
+            return command
+
+    def _run_command(self, action, game):
+        """명령 도구: ⑨로 넘기고, 게임이 가져가 실행한 뒤의 새 상태(seq가 더 큼)를 최대 COMMAND_STATE_WAIT초 기다린다.
+        결과는 판단 기록의 command·command_outcome·command_result로 남긴다. 키는 보내지 않는다."""
+        inp = action["input"]
+        args = {k: inp[k] for k in ("x", "y", "until") if inp.get(k) is not None}
+        seq = self.last_state_seq or 0
+        entry = self.entries[-1]
+        entry["command"] = {"name": action["tool"], "args": args}
+        with self._lock:
+            self._command = {"seq": seq, "name": action["tool"], "args": args}
+            self._command_taken_at = 0.0
+        if hasattr(game, "focus"):  # 사람이 키를 누르지 않게 게임 창을 앞으로 (입력 잠금은 그대로)
+            game.focus()
+        start, outcome = time.time(), None
+        try:
+            while True:
+                self._guard()  # 판 끝·일시정지·게임 신호 확인 (키를 보낼 때와 같은 확인)
+                with self._lock:
+                    taken, last = self._command is None, self._last_state
+                if taken and last and last[0] > seq:
+                    lc = last[1].get("last_command")
+                    outcome = {"state_seq": last[0], "outcome": lc.get("outcome") if isinstance(lc, dict) else None,
+                               "reasons": last[2]}
+                    entry["command_result"] = command_result(lc, last[2], (last[1].get("hero") or {}).get("pos"))
+                    break
+                if time.time() - start > COMMAND_STATE_WAIT:
+                    outcome = {"state_seq": None, "outcome": "taken_no_state" if taken else "not_taken", "reasons": []}
+                    entry["command_result"] = "결과 상태가 오지 않음" if taken else "게임이 가져가지 않음"
+                    break
+                self._stop.wait(0.1)
+        finally:
+            with self._lock:
+                not_taken, self._command = self._command is not None, None  # 못 가져간 명령은 버린다 (나중에 실행되지 않게)
+            if self._command_taken_at:  # 명령을 넘긴 순간 = 키를 누른 순간과 같은 기준 (그 뒤 받은 상태만 다음 판단에 씀)
+                self._input_done_at = max(self._input_done_at, self._command_taken_at)
+            if outcome is None:  # 멈춤·일시정지로 기다림을 그만둠
+                outcome = {"state_seq": None, "outcome": "not_taken" if not_taken else "interrupted_wait", "reasons": []}
+            entry["command_outcome"] = outcome
+            self._rewrite_log()
+
+    def _rewrite_log(self):
+        """판단 기록 전체를 다시 쓴다 (명령 결과는 판단을 적은 뒤에 알게 되므로)."""
+        with self._lock:
+            lines = [json.dumps(e, ensure_ascii=False) for e in self.entries]
+        with open(os.path.join(self.run_dir, "log.jsonl"), "w", encoding="utf-8") as f:
+            f.write("".join(line + "\n" for line in lines))
 
     def take_goal_notice(self):
         """다음 목표로 넘어간 뒤 첫 판단에 한 번 주는 알림. 없으면 ("", [])."""
@@ -1053,9 +1187,10 @@ class Agent:
     def tools(self):
         """도구 설명. 최종 목표를 바꾼 판만 check_goal 설명의 목표를 바꾼다."""
         goal = self.custom_goal()
+        base = TOOLS + COMMAND_TOOLS if self._watch_game else TOOLS  # 게임에서 시작한 판은 명령 도구도 (A-6-5)
         if not goal:
-            return TOOLS
-        tools = json.loads(json.dumps(TOOLS))
+            return base
+        tools = json.loads(json.dumps(base))
         for tool in tools:
             prop = tool["input_schema"]["properties"]["check_goal"]
             prop["description"] = prop["description"].replace(f"최종 목표({DEFAULT_GOAL_SHORT})", f"최종 목표({goal})")
@@ -1067,7 +1202,9 @@ class Agent:
         goal = self.custom_goal()
         if goal:  # 기본 목표 문장만 바꾼다
             system = system.replace(f"[최종 목표] {DEFAULT_GOAL}.", f"[최종 목표] {goal}.")
-        if self._watch_game:  # 게임에서 시작한 판은 판단마다 [게임 정보]·[지도]도 받는다
+        if self._watch_game:  # 게임에서 시작한 판은 [조작법]에 명령 설명, 판단마다 [게임 정보]·[지도]도 받는다
+            last_rule = "- 키 하나를 누를 때마다 한 턴이 지나고, 그동안 적도 움직인다"
+            system = system.replace(last_rule, last_rule + "\n" + COMMAND_RULES, 1)
             system += "\n\n" + GAME_DATA_RULES
         if self.config.get("started_from") == "game":  # 화면에 보이는 직업·제약 이름만. 시드는 넣지 않는다
             system += "\n\n[이번 판]\n직업: " + (self.config.get("hero_title") or self.config.get("hero_class") or "?")
@@ -1151,15 +1288,19 @@ class Agent:
                     final_status = "stopped"
                     break
                 self.phase = "acting"
+                is_command = bool(action) and action["tool"] in COMMAND_NAMES
                 if not self.config["dry_run"]:
                     try:
-                        game.execute(action)
+                        if is_command:  # 게임 명령: ⑨로 넘기고 결과 상태를 기다린다 (A-6-5)
+                            self._run_command(action, game)
+                        else:
+                            game.execute(action)
                     except PauseRequested:  # 남은 키는 보내지 않고, 재개 뒤 다음 판단으로 넘어간다
                         pass
                     # 마지막 키·클릭을 누른 순간. 이 뒤에 받은 상태만 다음 판단의 게임 데이터로 쓴다
                     # (키를 다 보낸 뒤 시각으로 재면, 그 사이 이미 도착한 행동 뒤 상태를 지난 것으로 잘못 본다: 11/14 첫 실제 판)
                     self._input_done_at = max(self._input_done_at, getattr(game, "last_input_at", 0.0))
-                time.sleep(WAIT_AFTER_ACTION)
+                time.sleep(COMMAND_SHOT_DELAY if is_command and not self.config["dry_run"] else WAIT_AFTER_ACTION)
                 step += 1
         except StopRequested:
             final_status = "stopped"
@@ -1380,7 +1521,7 @@ class Agent:
                              and beat_waiting and beat_seq == seq)
                 if fresh or same_wait:
                     log, self._pending_log = self._pending_log, []
-                    return {"seq": seq, "text": game_data_text(ai, reasons, log), "log": log, "skipped": None,
+                    return {"seq": seq, "text": game_data_text(ai, reasons, log, show_command=not same_wait), "log": log, "skipped": None,
                             "same_wait": same_wait}
             # 아직 행동 중이면(쉬기 등) 그 사이 새 상태가 올 수도 있으니 마감까지 기다린다
             if time.time() >= deadline or self._stop.wait(0.1):
@@ -1403,6 +1544,7 @@ class Agent:
         if recent:
             history = "\n".join(
                 f"- 판단 {e['step']}: {e['thought'][:120]} → {e['action_text']}{mark}"
+                + (f" → {e['command_result']}" if e.get("command_result") else "")
                 + (f" [근거: {e['basis']}]" if e.get("basis") else "")
                 for e in recent
             )

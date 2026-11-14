@@ -59,7 +59,8 @@ const BASIS_ICON = { "화면": "👀 화면에서 봄", "기록": "📒 기록·
 // 생각만 하기 판의 행동 표시 (agent.py의 NOT_EXECUTED_MARK와 같은 글, AI 입력에도 붙는다)
 const NOT_EXECUTED = "(실제로 실행 안 됨)";
 function actionLabel(entry, config) {
-  return entry.action_text + (config && config.dry_run ? " " + NOT_EXECUTED : "");
+  return entry.action_text + (entry.command_result ? " → " + entry.command_result : "")  // 게임 명령의 결과 (A-6-5)
+    + (config && config.dry_run ? " " + NOT_EXECUTED : "");
 }
 
 // 개입 횟수: 개입 규칙은 "힌트만, 조종 금지"라서 사람이 조작했을 수 있는 일시정지·F12 비상 해제도 센다.

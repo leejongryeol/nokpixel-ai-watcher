@@ -382,7 +382,19 @@ def bridge_state():
         return jsonify({"ok": False, "reason": "not_running"}), 409
     if not a.receive_state(data):
         return jsonify({"ok": False, "reason": "bad_state"}), 400
-    return jsonify({"ok": True, "want_command": False})
+    return jsonify({"ok": True, "want_command": a.wants_commands()})
+
+
+@app.post("/api/bridge/command")
+@bridge_only
+def bridge_command():
+    """⑨ 명령 받기 (A-6-5): 게임이 주인공이 입력을 기다리는 동안 0.5초마다 묻는다. 명령은 한 번만 넘기고 지운다.
+    일시정지·중지·한도 도달·판 끝 중에는 null."""
+    data = body()
+    a = running_agent(data.get("run_id"))
+    if not a:
+        return jsonify({"command": None, "reason": "not_running"}), 409
+    return jsonify({"command": a.take_command(int_or_none(data.get("seq")))})
 
 
 @app.post("/api/bridge/ended")

@@ -146,8 +146,18 @@ GAME_DATA_RULES = """[게임 정보 읽는 법]
 - 좌표는 (x,y). x는 오른쪽, y는 아래쪽으로 커진다 (w로 가면 y가 1 줄고, d로 가면 x가 1 는다). 지도 위 숫자는 x, 왼쪽 숫자는 y.
 - 기호: @ 나, 1~9 지금 보이는 적(목록 번호, 10번째부터 M), # 벽, . 바닥, + 닫힌 문, ' 열린 문, L 잠긴 문, < 올라가는 계단, > 내려가는 계단, ~ 물, , 풀, " 높은 풀, : 낭떠러지, ^ 함정, T 조각상 등 막힌 것, 0 우물·연금 솥, * 바닥 아이템, ? 그 밖의 지형
 - 빈칸은 아직 본 적 없는 곳이다. 지형은 본 그대로 기억한 모습이고, 적은 지금 보이는 것만 있다.
+- [게임 정보]의 "주변 8칸"은 내 바로 옆 칸이 무엇인지와 그 칸으로 가는 키다. 지도와 같은 내용이니, 바로 옆 칸은 지도 글자를 세지 말고 이 줄로 확인한다.
 - [게임 정보]·[지도]에서 본 것도 basis는 "화면"으로 적는다."""
 GAME_DATA_NONE = "[게임 정보] 이번 판단에는 없음 (화면만 보고 판단)"
+# 게임 데이터 글 버전 (config.json의 game_data_version). 1: A-6-3 처음 (이 칸이 없는 기록) / 2: 주변 8칸 줄 더함 (11/14)
+GAME_DATA_VERSION = 2
+# 주변 8칸: (방향 이름, 키, dx, dy). 순서는 북쪽부터 시계 방향
+AROUND = [("북", "w", 0, -1), ("북동", "num9", 1, -1), ("동", "d", 1, 0), ("남동", "num3", 1, 1),
+          ("남", "s", 0, 1), ("남서", "num1", -1, 1), ("서", "a", -1, 0), ("북서", "num7", -1, -1)]
+# 지도 기호 → 이름 (GAME_DATA_RULES의 기호 표와 같음). 1~9·M은 적
+MAP_SYMBOLS = {"#": "벽", ".": "바닥", "+": "닫힌 문", "'": "열린 문", "L": "잠긴 문", "<": "올라가는 계단",
+               ">": "내려가는 계단", "~": "물", ",": "풀", '"': "높은 풀", ":": "낭떠러지", "^": "함정",
+               "T": "막힌 것", "0": "우물·연금 솥", "*": "바닥 아이템", "?": "그 밖의 지형", "@": "나", " ": "안 본 곳"}
 GAME_LOG_LINES = 8  # [게임 정보]의 최근 메시지 최대 줄 수 (게임의 AIBridge.LOG_LINES와 같음)
 SAME_WAIT_TIMEOUT = 1.5  # 행동 뒤 새 상태가 없을 때, "같은 대기 그대로"인지 알려 줄 살아 있음 신호(1초마다)를 기다리는 최대 시간(초)
 BEAT_MARGIN = 0.25  # 키를 누른 뒤 이 시간(초)이 지나 받은 살아 있음 신호만 "같은 대기 그대로"의 근거로 쓴다
@@ -291,6 +301,23 @@ def map_text(m):
     return "\n".join(lines)
 
 
+def around_text(m, pos):
+    """주변 8칸 줄: 지도에서 내 바로 옆 칸 기호를 읽어 방향·키·이름·좌표로 쓴다 (지도에 없는 정보는 더하지 않는다).
+    AI가 지도 글자를 세다 한 열씩 틀리는 일이 있어서 (11/14 실제 판 두 번) 바로 옆 칸만 따로 적는다."""
+    rows = [str(r) for r in (m or {}).get("rows") or []]
+    origin = (m or {}).get("origin") or [0, 0]
+    if not rows or len(origin) != 2 or not (isinstance(pos, list) and len(pos) == 2):
+        return "주변 8칸: 알 수 없음"
+    parts = []
+    for name, key, dx, dy in AROUND:
+        x, y = pos[0] + dx, pos[1] + dy
+        r, c = y - origin[1], x - origin[0]
+        ch = rows[r][c] if 0 <= r < len(rows) and 0 <= c < len(rows[r]) else " "
+        what = f"적 {ch}" if ch.isdigit() and ch != "0" or ch == "M" else MAP_SYMBOLS.get(ch, "그 밖의 지형")
+        parts.append(f"{name}({key}) {what} ({x},{y})")
+    return "주변 8칸: " + " · ".join(parts)
+
+
 def game_data_text(ai, reasons, log_lines):
     """⑧ 상태의 ai 칸 → AI 입력의 [게임 정보]·[지도] 글 (game-state.md 1-3). record·seq·run_id는 쓰지 않는다."""
     hero = ai.get("hero") or {}
@@ -302,6 +329,7 @@ def game_data_text(ai, reasons, log_lines):
                  f"힘 {hero.get('str', '?')} · 금화 {hero.get('gold', '?')} · "
                  f"배고픔 {HUNGER_NAMES.get(hero.get('hunger'), '?')} · 상태이상 {buffs}")
     lines.append(f"위치 {_xy(hero.get('pos'))}, 발밑: {hero.get('standing_on', '?')}")
+    lines.append(around_text(ai.get("map"), hero.get("pos")))
 
     mobs = []
     for m in ai.get("mobs") or []:
@@ -686,6 +714,8 @@ class Agent:
                 self.config.update(goal_stage_now=stage, final_goal=GOAL_STAGES[stage][0], goals_reached=[])
         # AI가 받은 정보: 게임에서 시작한 판은 화면 + 게임 데이터, mvp.py·옛 설정 화면 판은 화면만 (이 칸이 없는 옛 기록은 screen)
         self.config["ai_input"] = "screen_data" if game_run else "screen"
+        if game_run:  # 게임 데이터 글 버전 (이 칸이 없는 screen_data 기록은 1)
+            self.config["game_data_version"] = GAME_DATA_VERSION
         if self.config["guide"]:  # 어떤 공략 문서로 돌린 판인지
             self.config["guide_version"] = guide_version()
         safe_player = "".join(c for c in self.config["player"] if c.isalnum() or c in "-_") or "player"

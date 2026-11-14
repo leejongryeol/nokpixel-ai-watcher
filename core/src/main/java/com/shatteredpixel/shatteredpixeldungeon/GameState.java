@@ -236,7 +236,7 @@ public class GameState {
 		}
 	}
 
-	private static boolean isUp( LevelTransition t ){
+	static boolean isUp( LevelTransition t ){ //AIBridge의 take_stairs 확인(cannot_leave)도 쓴다
 		return t.type == LevelTransition.Type.REGULAR_ENTRANCE || t.type == LevelTransition.Type.SURFACE
 				|| t.type == LevelTransition.Type.BRANCH_ENTRANCE;
 	}

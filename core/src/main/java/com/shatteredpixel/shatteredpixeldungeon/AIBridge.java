@@ -26,16 +26,21 @@ import com.badlogic.gdx.Net;
 import com.badlogic.gdx.utils.JsonReader;
 import com.badlogic.gdx.utils.JsonValue;
 import com.badlogic.gdx.utils.JsonWriter;
+import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Char;
+import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroAction;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Goo;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mimic;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
+import com.shatteredpixel.shatteredpixeldungeon.items.Heap;
 import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.shatteredpixel.shatteredpixeldungeon.items.potions.Potion;
 import com.shatteredpixel.shatteredpixeldungeon.items.rings.Ring;
 import com.shatteredpixel.shatteredpixeldungeon.items.scrolls.Scroll;
+import com.shatteredpixel.shatteredpixeldungeon.levels.Level;
 import com.shatteredpixel.shatteredpixeldungeon.levels.Terrain;
+import com.shatteredpixel.shatteredpixeldungeon.levels.features.LevelTransition;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.InterlevelScene;
@@ -97,6 +102,15 @@ public class AIBridge {
 	private static boolean doorPassed; //0단계: 주인공이 문 칸에 처음 들어섬
 	private static final ArrayList<Integer> bossesSlain = new ArrayList<>(); //1~5단계: 보스를 처치한 층 (5·10·15·20·25)
 
+	//⑨ 명령 받기 (A-6-5, game-state.md 3장·4장): 주인공이 입력을 기다리는 동안 0.5초마다 Python에 묻는다
+	private static final float COMMAND_EVERY = 0.5f;
+	private static float sinceCommand;
+	private static boolean commandInFlight;
+	private static boolean wantCommand; //마지막 ⑧ 응답의 want_command (Python이 명령 도구를 쓰는 판인지)
+	private static int commandAskedSeq; //이 상태 번호로는 명령을 이미 받아 처리함 (다음 상태까지 묻지 않는다)
+	private static int lastCommandSeq = -1; //마지막으로 처리한 명령의 seq (같은 seq는 한 번만)
+	private static JsonValue lastCommand; //다음 ⑧의 last_command로 보낼 값
+
 	//게임 메시지(GLog)를 모은다. 액터 스레드에서도 불리므로 잠근다. false를 돌려 화면 기록창도 그대로 받게 한다
 	private static final Signal.Listener<String> logListener = new Signal.Listener<String>() {
 		@Override
@@ -116,6 +130,7 @@ public class AIBridge {
 				GLog.update.add(logListener);
 				checkDoor();
 				checkWaiting();
+				pollCommand();
 				heartbeat();
 			} else {
 				GLog.update.remove(logListener);
@@ -138,6 +153,11 @@ public class AIBridge {
 		gooSeen = gooDead = false;
 		doorPassed = false;
 		synchronized (bossesSlain) { bossesSlain.clear(); }
+		sinceCommand = 0;
+		wantCommand = false;
+		commandAskedSeq = 0;
+		lastCommandSeq = -1;
+		lastCommand = null;
 		synchronized (logLines) { logLines.clear(); }
 	}
 
@@ -186,13 +206,14 @@ public class AIBridge {
 			wasWaiting = false;
 		}
 		Hero hero = Dungeon.hero;
-		boolean waiting = hero != null && hero.isAlive() && hero.ready && Dungeon.level != null
+		boolean waiting = hero != null && hero.isAlive() && hero.ready && hero.curAction == null && Dungeon.level != null
 				&& InterlevelScene.mode == InterlevelScene.Mode.NONE;
-		if (waiting && !wasWaiting) sendState();
+		if (waiting && !wasWaiting) sendState(false);
 		wasWaiting = waiting;
 	}
 
-	private static void sendState(){
+	//rejected: 명령을 실행하지 않아 주인공이 같은 대기에 그대로 있을 때. 이유는 rejected 하나로 보낸다 (3-3)
+	private static void sendState( boolean rejected ){
 		Hero hero = Dungeon.hero;
 		ArrayList<JsonValue> log;
 		synchronized (logLines) {
@@ -211,7 +232,9 @@ public class AIBridge {
 
 		//끝난 이유 (game-state.md 3-3). Hero는 고치지 않고 직전 상태와 비교해서 정한다
 		JsonValue reasons = GameState.array();
-		if (prevDepth < 0) {
+		if (rejected) {
+			reasons.addChild(new JsonValue("rejected"));
+		} else if (prevDepth < 0) {
 			reasons.addChild(new JsonValue("start"));
 		} else {
 			if (Dungeon.depth != prevDepth) {
@@ -241,15 +264,151 @@ public class AIBridge {
 		body.addChild("run_id", new JsonValue(activeRunId));
 		body.addChild("seq", new JsonValue(++stateSeq));
 		body.addChild("reasons", reasons);
-		body.addChild("last_command", new JsonValue(JsonValue.ValueType.nullValue)); //명령은 A-6-3에서
+		//바로 앞 명령과 그 결과 (A-6-5). 명령이 없었으면 null. 한 번 보내면 지운다
+		body.addChild("last_command", lastCommand != null ? lastCommand : new JsonValue(JsonValue.ValueType.nullValue));
+		lastCommand = null;
 		body.addChild("ai", ai);
 		body.addChild("record", record(hero));
+		final String runId = activeRunId;
 		post("/api/bridge/state", body, SHORT_TIMEOUT, new Listener() {
 			@Override
 			public void onResult(JsonValue result) {
-				//실패하면 버린다. 다음 대기 때 새 상태를 보낸다. want_command는 A-6-3부터 쓴다
+				//실패하면 버린다. 다음 대기 때 새 상태를 보낸다
+				if (result != null && runId.equals(activeRunId)) wantCommand = result.getBoolean("want_command", false);
 			}
 		});
+	}
+
+	//⑨ 명령 받기: 주인공이 이 상태의 대기 그대로인 동안 0.5초마다. 앞 요청이 돌아오기 전에는 묻지 않는다
+	private static void pollCommand(){
+		if (!wantCommand || !wasWaiting || stateSeq == 0 || commandAskedSeq == stateSeq) return;
+		sinceCommand += Game.elapsed;
+		if (commandInFlight || sinceCommand < COMMAND_EVERY) return;
+		sinceCommand = 0;
+		final String runId = activeRunId;
+		JsonValue body = object();
+		body.addChild("run_id", new JsonValue(runId));
+		body.addChild("seq", new JsonValue(stateSeq));
+		commandInFlight = true;
+		post("/api/bridge/command", body, SHORT_TIMEOUT, new Listener() {
+			@Override
+			public void onResult(JsonValue result) {
+				commandInFlight = false;
+				if (result == null || !runId.equals(activeRunId)) return;
+				JsonValue c = result.get("command");
+				if (c != null && c.isObject()) runCommand(c);
+			}
+		});
+	}
+
+	//받은 명령을 확인하고(3-2) 실행한다. 걸리면 아무것도 하지 않고 rejected 상태로 알린다
+	private static void runCommand( JsonValue c ){
+		int seq = c.getInt("seq", -1);
+		if (seq == lastCommandSeq) return; //같은 명령은 한 번만
+		lastCommandSeq = seq;
+		commandAskedSeq = stateSeq;
+		String name = c.getString("name", "");
+		JsonValue args = c.get("args");
+		int x = args != null ? args.getInt("x", Integer.MIN_VALUE) : Integer.MIN_VALUE;
+		int y = args != null ? args.getInt("y", Integer.MIN_VALUE) : Integer.MIN_VALUE;
+		String until = args != null ? args.getString("until", "turn") : "turn";
+
+		String outcome;
+		try {
+			outcome = execute(seq, name, x, y, until);
+		} catch (Exception e) {
+			Game.reportException(e);
+			outcome = "error";
+		}
+
+		//args는 받은 JSON을 그대로 붙이지 않고 새로 만든다 (다른 트리에 달린 값을 옮기면 망가질 수 있음)
+		JsonValue cmd = object();
+		cmd.addChild("seq", new JsonValue(seq));
+		cmd.addChild("name", new JsonValue(name));
+		JsonValue a = object();
+		if (x != Integer.MIN_VALUE) a.addChild("x", new JsonValue(x));
+		if (y != Integer.MIN_VALUE) a.addChild("y", new JsonValue(y));
+		if (name.equals("rest")) a.addChild("until", new JsonValue(until));
+		cmd.addChild("args", a);
+		cmd.addChild("outcome", new JsonValue(outcome == null ? "ok" : outcome));
+		lastCommand = cmd;
+
+		if (outcome == null) {
+			wasWaiting = false; //행동이 턴 없이 끝나도(길 없음 등) 다음 대기에서 새 상태를 보낸다
+		} else {
+			sendState(true); //주인공은 같은 대기 그대로. 새 상태 번호로 실행 안 함을 알린다
+		}
+	}
+
+	//null이면 실행함. 아니면 실행하지 않은 이유 (game-state.md 3-2 순서)
+	private static String execute( int seq, String name, int x, int y, String until ){
+		Hero hero = Dungeon.hero;
+		Level level = Dungeon.level;
+		if (hero == null || !hero.isAlive()) return "dead";
+		if (!hero.ready || hero.curAction != null) return "not_ready";
+		if (GameScene.interfaceBlockingHero()) return "window_open";
+		if (seq != stateSeq) return "stale";
+
+		//칸을 쓰지 않는 명령: 툴바 기다리기(짧게·길게)·탐색과 같은 함수
+		if (name.equals("rest")) {
+			hero.rest(until.equals("full"));
+			return null;
+		}
+		if (name.equals("search")) {
+			hero.search(true);
+			return null;
+		}
+		if (!name.equals("move_to") && !name.equals("attack") && !name.equals("pick_up") && !name.equals("take_stairs")) {
+			return "bad_command";
+		}
+
+		int cell;
+		if (name.equals("pick_up") && x == Integer.MIN_VALUE && y == Integer.MIN_VALUE) {
+			cell = hero.pos; //발밑
+		} else {
+			if (x < 0 || y < 0 || x >= level.width() || y >= level.height()) return "out_of_map";
+			cell = x + y * level.width();
+		}
+		//모르는 칸: 성공·실패만으로 안 본 지형을 알게 되므로 실행하지 않는다
+		if (!GameState.shown(level, cell)) return "unknown_cell";
+
+		Char ch = Actor.findChar(cell);
+		boolean disguisedChest = ch instanceof Mimic && ch.alignment == Char.Alignment.NEUTRAL && GameState.seenChar(ch, level);
+		if (name.equals("attack")) {
+			if (!(ch instanceof Mob) || !GameState.seenChar(ch, level) || ch.alignment != Char.Alignment.ENEMY) return "no_enemy";
+		} else if (name.equals("pick_up")) {
+			Heap heap = level.heaps.get(cell);
+			if ((heap == null || !heap.seen || heap.isEmpty()) && !disguisedChest) return "no_item";
+		} else if (name.equals("take_stairs")) {
+			LevelTransition t = level.getTransition(cell);
+			if (t == null) return "no_stairs";
+			if (Dungeon.depth == 1 && GameState.isUp(t)) return "cannot_leave";
+		}
+
+		//칸 누르기와 같은 경로. 게임이 고른 행동이 명령의 뜻과 다르면 실행하지 않는다
+		hero.handle(cell);
+		HeroAction act = hero.curAction;
+		boolean match;
+		if (name.equals("move_to")) {
+			//본 적 없는 아이템이 있는 칸이면 게임은 줍기를 고른다. 여기서 막으면 아이템이 있다는 것을 알려 주게 되므로 사람이 누를 때처럼 그대로 한다
+			Heap unseen = level.heaps.get(cell);
+			match = act instanceof HeroAction.Move
+					|| (unseen != null && !unseen.seen && (act instanceof HeroAction.PickUp || act instanceof HeroAction.OpenChest));
+		} else if (name.equals("attack")) {
+			match = act instanceof HeroAction.Attack;
+		} else if (name.equals("pick_up")) {
+			//보이는 상자가 정체 전 미믹이면 사람이 눌렀을 때처럼 공격이 된다 (여기서 막으면 미믹인 것을 알려 주게 됨)
+			match = act instanceof HeroAction.PickUp || act instanceof HeroAction.OpenChest
+					|| (disguisedChest && act instanceof HeroAction.Attack);
+		} else {
+			match = act instanceof HeroAction.LvlTransition;
+		}
+		if (!match) {
+			hero.curAction = null;
+			return "not_this_action";
+		}
+		hero.next();
+		return null;
 	}
 
 	//이정표 기록용 값 (docs/project/progress-milestones.md). AI 입력에는 넣지 않는다.

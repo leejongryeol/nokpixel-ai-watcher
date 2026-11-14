@@ -202,6 +202,18 @@ def load_guide():
     return re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL).strip()  # 작성자용 주석은 빼고 전달
 
 
+def guide_version():
+    """guide.md 첫 주석의 "버전:" 줄 값 (config.json 기록용). 없으면 ""."""
+    try:
+        with open(GUIDE_PATH, encoding="utf-8") as f:
+            text = f.read()
+    except FileNotFoundError:
+        return ""
+    comment = re.match(r"\s*<!--(.*?)-->", text, flags=re.DOTALL)
+    found = re.search(r"^\s*버전:\s*(.+?)\s*$", comment.group(1), flags=re.MULTILINE) if comment else None
+    return found.group(1) if found else ""
+
+
 def read_text(path):
     try:
         with open(path, encoding="utf-8") as f:
@@ -655,6 +667,10 @@ class Agent:
         }
         if game_run:  # 게임의 AI 설정에서 시작한 판: 직업·제약은 AI 입력 [이번 판]에도 넣는다. 시드는 기록에만 남긴다
             self.config.update(game_run, started_from="game")
+        # AI가 받은 정보: 게임에서 시작한 판은 화면 + 게임 데이터, mvp.py·옛 설정 화면 판은 화면만 (이 칸이 없는 옛 기록은 screen)
+        self.config["ai_input"] = "screen_data" if game_run else "screen"
+        if self.config["guide"]:  # 어떤 공략 문서로 돌린 판인지
+            self.config["guide_version"] = guide_version()
         safe_player = "".join(c for c in self.config["player"] if c.isalnum() or c in "-_") or "player"
         self.run_id = datetime.now().strftime("run_%Y%m%d_%H%M%S_") + safe_player
         self.run_dir = os.path.join(LOGS_DIR, self.run_id)
@@ -989,7 +1005,6 @@ class Agent:
                     break
                 self.step = step
                 self.phase = "capture"
-                state_seq = self.last_state_seq  # 화면을 찍기 직전에 받은 게임 상태 (기록에만 남김)
                 game_data = self._take_game_data()  # 화면을 찍기 직전의 게임 데이터 (게임에서 시작한 판만)
                 image = game.capture()
                 if step == 1:  # 실제로 찍은 게임 창 크기를 기록에 남긴다
@@ -1011,7 +1026,7 @@ class Agent:
                     # 생각하는 동안 일시정지: 사람이 조작해 화면이 바뀌므로 이 판단은 버리고, 재개 뒤 같은 번호로 다시 생각한다
                     self._discard(usage, hints, game_data)
                     continue
-                self._record(step, image_name, thought, action, usage, hints, checkpoint, state_seq)
+                self._record(step, image_name, thought, action, usage, hints, checkpoint, game_data)
                 if self._stop.is_set():  # 생각하는 동안 판이 끝났으면 행동하지 않는다
                     final_status = "stopped"
                     break
@@ -1165,7 +1180,7 @@ class Agent:
         except Exception:
             return None
 
-    def _record(self, step, image_name, thought, action, usage, hints, checkpoint, state_seq=None):
+    def _record(self, step, image_name, thought, action, usage, hints, checkpoint, game_data=None):
         price_in, price_out = MODELS[self.config["model"]]["price"]
         cost = (usage["input_tokens"] * price_in + usage["output_tokens"] * price_out) / 1_000_000
         inp = action["input"] if action else {}
@@ -1204,8 +1219,12 @@ class Agent:
                 "output_tokens": usage["output_tokens"],
                 "cost_usd": round(cost, 6),
             }
-            if self._watch_game:  # 게임에서 시작한 판만: 그 판단 직전의 게임 상태 번호 (mvp.py 판의 줄 모양은 그대로)
-                entry["state_seq"] = state_seq
+            if game_data is not None:  # 게임에서 시작한 판만 (mvp.py 판의 줄 모양은 그대로)
+                entry["state_seq"] = game_data["seq"]  # AI 입력 [게임 정보]·[지도]에 쓴 상태 번호. 못 썼으면 null
+                if game_data["skipped"]:  # 못 쓴 이유: no_state(상태 없음) / stale(지난 행동 전 대기의 것)
+                    entry["game_data_skipped"] = game_data["skipped"]
+                if game_data.get("same_wait"):  # 새 상태가 없었지만 살아 있음 신호로 같은 대기임을 확인하고 쓴 상태
+                    entry["state_same_wait"] = True
             self.entries.append(entry)
             self.total_cost += cost
             self.total_tokens += usage["input_tokens"] + usage["output_tokens"]

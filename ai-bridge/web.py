@@ -356,8 +356,9 @@ def bridge_heartbeat():
 @app.post("/api/bridge/state")
 @bridge_only
 def bridge_state():
-    """⑧ 게임 상태 (주인공이 입력을 기다리게 될 때마다, docs/project/game-state.md). 저장과 이정표에만 쓴다.
-    명령(⑨)은 아직 없으므로 want_command는 언제나 false (A-6-2)."""
+    """⑧ 게임 상태 (주인공이 입력을 기다리게 될 때마다, docs/project/game-state.md). 저장·이정표에 쓰고,
+    ai 칸은 다음 판단의 AI 입력 [게임 정보]·[지도]로도 쓴다 (A-6-3. record는 AI 입력에 넣지 않음).
+    명령(⑨)은 아직 없으므로 want_command는 언제나 false."""
     if (request.content_length or 0) > STATE_MAX_BYTES:
         return jsonify({"ok": False, "reason": "too_large"}), 413
     data = body()

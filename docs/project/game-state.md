@@ -420,7 +420,7 @@ sequenceDiagram
 | **A-6-2** 데이터 읽기·숨기기·이정표 | `GameState.java`(읽기·걸러 내기·문자 지도), ⑧ 보내기와 대기 감지, `GLog` 듣는 쪽, Python의 ⑧ 받기·`states/` 저장·기록 창 표시, 숨김 검사 스크립트, **`milestones.json`과 리포트 표시** (AI 입력은 그대로) | 실제 게임에서 AI 판을 돌리면 판단마다 `states/*.json`이 생기고, 숨겨진 문이 있는 층에서 그 칸이 탐색 전 `#`이며, 검사 스크립트가 금지 글자를 찾지 못하고, 이정표가 `milestones.json`과 리포트에 남는다 |
 | **A-6-3** 데이터를 AI 입력으로 (11/14 오더로 범위 바뀜) | 판단 직전 상태로 [게임 정보]·[지도] 글, 규칙에 읽는 법, `config.json`의 `ai_input`·`guide_version`, `log.jsonl`의 `state_seq`. 결과는 10장 | 게임에서 시작한 판의 판단마다 [게임 정보]가 들어가고, 지도가 화면과 맞는다 |
 | **다음 작업** 명령 실행 (원래 A-6-3) | ⑨ 명령 받기, 게임 안 명령 9가지와 확인(3-2), 끝난 이유(3-3), Python의 명령 도구와 상태 기다리기 | 데이터 판에서 `move_to` 한 번으로 여러 칸 가고, 새 적이 나타나면 멈춰 `interrupted_enemy`로 다시 묻고, 모르는 칸·1층 입구 명령은 실행되지 않는다 |
-| **A-6-4** 실험 조건 | AI 설정의 [화면만 / 화면 + 데이터], ④ `ai_input`, `config.json` 값, 데이터 판 규칙 글 | "화면만" 판의 AI 입력이 바꾸기 전과 글자까지 같고, 두 조건 판 모두 `milestones.json`이 생긴다 |
+| **A-6-4** 최종 목표 단계 (11/14 오더로 범위 바뀜) | AI 설정의 목표 단계 0~6·[달성하면], 달성 판정(문 통과·보스 처치·엔딩), 다음 목표로 / 끝내기(타이틀로). 결과는 [bridge.md](bridge.md) 9장 "A-6-4 결과" | ✅ 목표 0·끝내기 실제 판에서 달성 기록과 타이틀 이동. "화면만" 조건 버튼은 만들지 않음 |
 
 **11/10 기능 마감 안에 들어가는지 (의견)**
 - 오늘은 11/4이고 마감까지 6일이다. A-6-2 약 1.5일, A-6-3 약 2일, A-6-4 약 1일로 보면 **빠듯하지만 들어간다**. 남는 하루는 실제 판 시험(비용이 드는 실행은 사용자 요청 때만)에 쓴다.
@@ -471,7 +471,7 @@ sequenceDiagram
 - 지금은 키 하나가 한 턴이라 판단 한 번에 상태가 1~3개 생긴다. 판단 기록에는 화면을 찍기 직전에 받은 상태 번호를 `state_seq`로 남긴다 (게임에서 시작한 판만. `mvp.py` 판의 줄 모양은 그대로).
 - 키를 보내는 시점·화면을 찍는 시점은 그대로다 (상태를 기다리지 않음).
 - **메시지**: `GLog.update`에 듣는 쪽을 AI 판 동안 매 프레임 `add`한다. `Signal.add()`는 이미 있으면 다시 넣지 않으므로(✅ `Signal.java:40`), `GameLog`가 새로 만들어지며 `replace()`로 지워도 다음 프레임에 다시 붙는다. 최대 8줄, 종류 `good`·`bad`·`warning`·`highlight`·`normal`.
-- **`record` 칸** (AI 입력·화면에 안 나옴, 이정표 판정에만): `enemies_slain`, `deepest_floor`, `hero_lvl`, `upgrades_used`, `equip_changes`(장착 무기·갑옷 물건이 바뀐 횟수), `items_total`(장착+가방 수량 합), `known_types`(정체를 아는 물약·주문서·반지 **종류 수**만. 어떤 것인지는 보내지 않음. `GameState`가 아니라 `AIBridge`에서 셈), `boss`(5층 구: `seen`, `hp_ratio`, `dead`).
+- **`record` 칸** (AI 입력·화면에 안 나옴, 이정표 판정에만): `enemies_slain`, `deepest_floor`, `hero_lvl`, `upgrades_used`, `equip_changes`(장착 무기·갑옷 물건이 바뀐 횟수), `items_total`(장착+가방 수량 합), `known_types`(정체를 아는 물약·주문서·반지 **종류 수**만. 어떤 것인지는 보내지 않음. `GameState`가 아니라 `AIBridge`에서 셈), `boss`(5층 구: `seen`, `hp_ratio`, `dead`). A-6-4(11/14)부터 최종 목표 달성 판정용 `door_passed`(문 칸에 처음 들어섬)·`bosses_slain`(보스를 처치한 층 목록) ([bridge.md](bridge.md) 9장 "A-6-4 결과").
 - 숨김 검사: 판이 끝날 때 `states/`가 있으면 `check_hidden.check_run()` → `config.json`의 `hidden_check` (`clean` / `found` / `no_states` / `error`).
 
 **설계와 다른 점**

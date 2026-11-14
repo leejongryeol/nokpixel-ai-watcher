@@ -50,6 +50,9 @@ AI에게는 점수를 알려주지 않는다. AI가 받는 목표는 여전히 "
 | 구 체력 절반 이하 | 본 적 있는 구의 `HP/HT` ≤ 0.5 | |
 | 구 처치 | 본 적 있는 구가 죽었거나 층에서 사라짐 | ✅ `Goo.die()` → `GameScene.bossSlain()` |
 
+### 최종 목표 달성 기록 (A-6-4)
+이정표와 따로, AI 설정에서 고른 최종 목표 단계(0 문 통과 ~ 6 엔딩)를 이룬 것은 `config.json`의 `goals_reached`에 `{stage, goal, step, at, depth}`로 남는다. 판정은 같은 ⑧ `record`의 `door_passed`·`bosses_slain`과 ⑥ `won`. 이정표 점수에는 더하지 않는다. 끝내기로 끝난 판의 `ended_reason`은 `goal_reached` ([bridge.md](bridge.md) 9장).
+
 ## 함께 관찰할 것: "속이는 목표"
 
 VPT 논문은 지금 단계에 가장 좋은 행동이 다음 단계를 어렵게 만드는 경우를 "속이는 보상"이라고 불렀다

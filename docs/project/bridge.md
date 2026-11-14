@@ -154,12 +154,14 @@ flowchart TD
   "player": "player", "model": "gpt-6-luna", "guide": false, "dry_run": false,
   "steps": 50, "lessons_from": "",
   "hero_class": "WARRIOR", "hero_title": "전사",
-  "challenges": 0, "challenge_names": [], "challenge_titles": [], "custom_seed": ""
+  "challenges": 0, "challenge_names": [], "challenge_titles": [], "custom_seed": "",
+  "goal_stage": 1, "on_goal": "end"
 }
 응답 {"ok": true, "run_id": "run_20261102_140501_player"}
 ```
 Python은 `Agent`를 만들어 두기만 하고 **아직 시작하지 않는다** (대기 판). `config.json`도 이때 쓴다 (A-5-3). ⑤가 오면 시작한다 (A-5-4).
 `hero_title`·`challenge_titles`는 게임 화면에 보이는 언어 그대로의 이름이다 (A-5-4). AI 입력의 `[이번 판]`에 쓴다 (7장).
+`goal_stage`(0~6, 그 밖은 1)·`on_goal`(`end`/`next`, 그 밖은 `end`)은 최종 목표 단계와 달성 뒤 처리다 (A-6-4, 9장 "A-6-4 결과"). 11/14 전 게임이 보내던 `final_goal`(자유 글)은 없앴다.
 
 **⑤ 던전 도착** `POST /api/bridge/arrived` (게임 → Python, [AI로 시작]한 판의 첫 `GameScene`에서 한 번만)
 ```json
@@ -193,7 +195,7 @@ Python은 `Agent`를 만들어 두기만 하고 **아직 시작하지 않는다*
 ```
 - `state_seq`·`waiting` (A-6-3, 11/14): 게임이 마지막으로 보낸 ⑧ 상태 번호와, 주인공이 그 상태를 보낸 입력 대기 그대로인지. 벽에 부딪히기·창 열기처럼 턴이 안 지나는 입력 뒤에는 새 ⑧이 없으므로, Python은 이 값으로 마지막 상태가 아직 맞는지 안다 ([game-state.md](game-state.md) 10장). 두 값이 없는 옛 게임이면 Python은 마지막 상태를 쓰지 않는다.
 - ⑤가 성공한 뒤부터 `GameScene`에 있는 동안 보낸다. 주인공이 죽은 것을 처음 보면 1초를 기다리지 않고 바로 `alive: false`를 보낸다.
-- 응답이 `ok: false`(판이 이미 끝남, 관찰기를 다시 켬)면 게임은 신호를 멈춘다. 3번 연달아 실패하면(관찰기가 꺼짐) 신호를 멈추고 기록창에 한 줄 띄운다. 게임은 그대로 진행한다.
+- 응답이 `ok: false`(판이 이미 끝남, 관찰기를 다시 켬)면 게임은 신호를 멈춘다. 이때 `goto_title: true`가 함께 오면(최종 목표를 이뤄 끝내기로 끝난 판, A-6-4) 게임 메뉴 [타이틀로]와 같은 처리(`Dungeon.saveAll()` + `TitleScene`)로 타이틀에 간다. 판 표시를 먼저 지우므로 ⑥ `quit`은 가지 않는다. Python은 마지막 화면(`final.png`)을 찍는 동안 `ok: true`로 신호를 붙잡아 두고, 찍은 뒤 한 번만 `goto_title`을 보낸다. 3번 연달아 실패하면(관찰기가 꺼짐) 신호를 멈추고 기록창에 한 줄 띄운다. 게임은 그대로 진행한다.
 - Python은 키·클릭 하나를 보내기 **직전마다** 확인한다 (`Agent._guard()`): 중지됐으면 멈춤 → 마지막 신호가 `alive: false`면 `died` → 신호가 3초 넘게 없으면 키를 보내지 않고 기다림(층 이동 로딩일 수 있음) → 게임 창이 없어졌으면 `game_closed` → 30초가 지나면 `lost_game`. 게임 창이 맨 앞일 때만 키를 보내는 기존 확인은 그대로다.
 - 키를 보내지 않고 기다리는 동안(일시정지, 한도 도달)에도 확인한다 (A-5-5, `Agent._check_game_waiting()`): `alive: false`면 `died`, 신호가 33초 넘게 없으면 게임 창이 없을 때 `game_closed`, 있을 때 `lost_game`.
 
@@ -205,7 +207,7 @@ Python은 `Agent`를 만들어 두기만 하고 **아직 시작하지 않는다*
 응답 {"ok": true, "want_command": false}
 ```
 - 보내는 때: AI 판 동안 주인공이 입력을 기다리게 될 때마다 한 번 (층 도착 직후 포함). 실패하면 버리고 다음 대기 때 새 상태를 보낸다.
-- Python은 `logs/<판>/states/<seq>.json`에 저장하고 이정표를 판정한다. A-6-3(11/14)부터 `ai` 칸을 다음 판단의 AI 입력 [게임 정보]·[지도] 글로도 쓴다. `record`는 이정표에만 쓰고 AI 입력에는 넣지 않는다.
+- Python은 `logs/<판>/states/<seq>.json`에 저장하고 이정표를 판정한다. A-6-3(11/14)부터 `ai` 칸을 다음 판단의 AI 입력 [게임 정보]·[지도] 글로도 쓴다. `record`는 이정표와 최종 목표 달성 판정(A-6-4의 `door_passed`·`bosses_slain`)에만 쓰고 AI 입력에는 넣지 않는다.
 - 거절: 진행 중 판과 `run_id`가 다르면 `not_running`(409), `seq`·`ai`·`record`가 이상하면 `bad_state`(400), 1MB가 넘으면 `too_large`(413).
 - `want_command`는 명령(⑨, 다음 작업)이 생기기 전까지 언제나 `false`.
 
@@ -493,6 +495,25 @@ AI 입력(규칙·도구 설명·큰 점검·교훈 쓰기 요청)과 `log.jsonl
 - ⬜ 실제 게임에서: 버튼 모양(세로 3종), 게임 메뉴 [AI 관찰기 켜기], 진짜 F12, 한도 도달 중 입력 잠금 (손 시험 목록 `docs/test-results/test-results-2026-11-02.txt` 9장)
 
 ---
+
+### A-6-4 결과 (11/14) · 최종 목표 단계와 달성 뒤 처리
+
+최종 목표(구 처치)를 이뤄도 판이 그대로 이어졌고, 최종 목표는 자유 글이라 판끼리 비교가 어려웠다.
+
+| 무엇 | 내용 |
+|---|---|
+| AI 설정 | [최종 목표] 글 입력창을 없애고 단계 버튼(누를 때마다 0→6→0, 기본 1)과 [달성하면: 끝내기 / 다음 목표로](기본 끝내기). 자리: (목표 \| 달성하면), (최대 판단 \| 플레이어). 저장은 `SPDSettings`에서 물려받은 `getInt/put("ai_goal_stage")`·`getBoolean/put("ai_on_goal_next")` (`SPDSettings.java`는 안 고침) |
+| 단계 | 0 문 통과(시험용) · 1 5층 보스 · 2 10층 · 3 15층 · 4 20층 · 5 25층 보스 · 6 엔딩. AI에게 주는 문장은 `agent.py`의 `GOAL_STAGES` (보스 이름은 게임 화면의 한국어 이름: 구, 텐구 암살자, DM-300, 드워프 제왕, 요그제바) |
+| 판정 | 0: 주인공이 문 칸(`DOOR`·`OPEN_DOOR`)에 처음 들어섬 (`AIBridge`가 매 프레임 확인, ⑧ `record.door_passed`). 1~5: 본 던전(`branch 0`)의 그 층에서 `GameScene.bossSlain()`이 불림 (`AIBridge.onBossSlain()`, `record.bosses_slain`, 갈래 퀘스트 보스 제외). 6: ⑥ `won` |
+| 다음 목표로 | 단계를 올리고 다음 판단의 판단 요청 글 맨 앞에 "최종 목표 달성: (이전). 새 최종 목표: (다음)." 한 번. 규칙의 [최종 목표] 줄·`check_goal` 설명도 새 목표로. 일시정지로 버린 판단이면 다시 준다. 6 달성이면 끝 |
+| 끝내기 | `ended_reason: goal_reached` → AI 멈춤·입력 잠금 풀림 → `final.png` → ⑦ `goto_title`로 게임이 타이틀로 → 교훈 쓰기. 6단계는 게임이 엔딩으로 가므로 타이틀로 보내지 않음 |
+| 기록 | `config.json`: `goal_stage`(시작), `goal_stage_now`, `on_goal`, `final_goal`(지금 단계 문장), `goals_reached: [{stage, goal, step, at, depth}]`. `log.jsonl`: 알림을 준 판단에 `goal_notice` |
+| 화면 | 관찰 패널 최종 목표 줄 "N단계 · 문장 · 달성: 0단계(판단 13)", 끝난 이유 "최종 목표 달성으로 끝남". 리포트도 같음 |
+| 게임 코드 | `GameScene.bossSlain()` 첫 줄 한 줄. 게임 규칙·던전 생성·시드는 안 고침 |
+
+- **비교 주의**: 1단계 문장 "지하 5층의 보스 구를 처치하는 것"은 11/14 전 기본 목표 "지하 5층의 보스를 처치하는 것"과 한 단어 다르다 (사용자 결정). `config.json`에 `goal_stage`가 있으면 A-6-4 뒤 판이다. `mvp.py` 판은 단계가 없고 AI 입력이 그대로다 ✅.
+- 확인: ✅ `desktop:compileJava`, `py_compile`, 숨김 검사 / ✅ 데모: 다음 목표로(0→1→2, 알림 각 한 번), 끝내기(⑦ 응답 `ok:true` → `goto_title` 한 번), 1단계에서 10층 보스만은 달성 아님·5층 더하면 1·2단계 함께, 6단계 + ⑥ `won` / ✅ 실제 판(GPT-6 Luna, 목표 0, 끝내기): 문 칸에 들어선 상태에서 `goal_reached`, `final.png`·교훈, 게임이 스스로 타이틀로 감(사용자 확인)
+- ⬜ 실제 판의 "다음 목표로", 실제 보스 처치 판정 (데모로만 확인)
 
 ## 10. 남은 질문 · 미확인
 

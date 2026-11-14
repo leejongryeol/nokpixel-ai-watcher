@@ -25,6 +25,7 @@ AI가 사람처럼 **게임 화면을 보고 키보드·마우스로 조작**한
 | AI 설정 장면 | `core/.../scenes/AISetupScene.java` (+ `HeroSelectScene` [시작], `SPDSettings` `ai_*`, `TextInput.setPasswordMode`, `scenes*.properties`) | 캐릭터 선택 → AI 설정 → 던전. Python에 상태를 묻고 키 보내기·연결 시험·판 준비(`config.json`)까지 한다. 관찰기가 꺼져 있으면 [AI 관찰기 켜기]로 `web.py --panels`를 새 명령 창에서 켠다. 게임에서 시작하는 판은 언제나 실제 조작. 던전 1층 도착(⑤)에서 AI 판이 자동으로 시작하고, `GameScene`의 `gameOver()`·`destroy()`에서 판 끝(⑥)을, AI 판 동안 1초마다 살아 있음 신호(⑦)를 보낸다 (A-5-4). 최종 목표는 단계 0~6에서 고르고, 이루면 다음 목표로 잇거나 판을 끝내 타이틀로 간다 (A-6-4, `GameScene.bossSlain()`에 한 줄). 자세한 것: [bridge.md](bridge.md) 3장·9장 |
 | 게임 ↔ Python 통로 | `core/.../AIBridge.java`, `web.py`의 `/api/bridge/*` | 게임이 `Gdx.net`으로 `127.0.0.1:8765`에 묻고, 응답은 렌더 스레드로 넘긴다. 실패해도 게임은 멈추지 않는다 |
 | 게임 데이터 | `core/.../GameState.java`, `AIBridge`의 ⑧ | 주인공이 입력을 기다리게 될 때마다 화면에 보이는 범위의 데이터(문자 지도 등)를 만들어 보낸다. 숨길 정보는 이 파일 안에서 걸러 낸다. Python은 `states/`에 저장하고 진행도 이정표(`milestones.json`)를 판정한다. 게임에서 시작한 판은 판단마다 AI 입력 [게임 정보]·[지도] 글로도 쓴다 (A-6-3, 11/14, [game-state.md](game-state.md) 10장) |
+| 게임 명령 | `AIBridge`의 ⑨, `agent.py`의 명령 도구 | 게임에서 시작한 판의 AI는 키·클릭 말고도 `move_to`·`attack`·`pick_up`·`take_stairs`·`rest`·`search`를 쓴다. 게임은 0.5초마다 명령을 묻고, 확인한 뒤 칸 누르기·툴바와 같은 함수로 실행한다 (A-6-5, 11/15, [game-state.md](game-state.md) 11장) |
 | 숨김 검사 | `ai-bridge/check_hidden.py` | 판 끝에 상태 파일에서 시드·클래스 이름 등 금지 글자를 찾아 `config.json`의 `hidden_check`에 남긴다 |
 | AI 플레이어 | `ai-bridge/agent.py` | 화면 캡처 → AI 모델 호출(Claude / OpenAI) → 키·클릭 실행 → 기록 |
 | 관찰 웹 화면 | `ai-bridge/web.py`, `ai-bridge/web/` | 실시간 관찰, 리포트·되감기, 실험 설정 화면은 데모 전용 (내 컴퓨터에서만 접속) |

@@ -204,12 +204,20 @@ Python은 `Agent`를 만들어 두기만 하고 **아직 시작하지 않는다*
 요청 {"state_version": 1, "run_id": "run_…", "seq": 12, "reasons": ["interrupted_enemy"], "last_command": null,
       "ai": {"hero": {…}, "map": {…}, "mobs": […], "heaps": […], "transitions": […], "traps": […], "plants": […], "bag": {…}, "log": […]},
       "record": {"enemies_slain": 0, "deepest_floor": 1, …}}
-응답 {"ok": true, "want_command": false}
+응답 {"ok": true, "want_command": true}
 ```
 - 보내는 때: AI 판 동안 주인공이 입력을 기다리게 될 때마다 한 번 (층 도착 직후 포함). 실패하면 버리고 다음 대기 때 새 상태를 보낸다.
 - Python은 `logs/<판>/states/<seq>.json`에 저장하고 이정표를 판정한다. A-6-3(11/14)부터 `ai` 칸을 다음 판단의 AI 입력 [게임 정보]·[지도] 글로도 쓴다. `record`는 이정표와 최종 목표 달성 판정(A-6-4의 `door_passed`·`bosses_slain`)에만 쓰고 AI 입력에는 넣지 않는다.
 - 거절: 진행 중 판과 `run_id`가 다르면 `not_running`(409), `seq`·`ai`·`record`가 이상하면 `bad_state`(400), 1MB가 넘으면 `too_large`(413).
-- `want_command`는 명령(⑨, 다음 작업)이 생기기 전까지 언제나 `false`.
+- `want_command`: 게임에서 시작한 판이면 `true` (A-6-5, 11/15). 게임은 이때 ⑨로 명령을 묻는다.
+- `last_command`: 바로 앞 ⑨ 명령과 결과 `{"seq", "name", "args", "outcome"}`, 없으면 `null`. 명령을 실행하지 않았으면 `reasons`는 `["rejected"]`.
+
+**⑨ 명령 받기** `POST /api/bridge/command` (게임 → Python, A-6-5. 자세한 것: [game-state.md](game-state.md) 11장)
+```json
+요청 {"run_id": "run_…", "seq": 12}
+응답 {"command": null}  또는  {"command": {"seq": 12, "name": "move_to", "args": {"x": 20, "y": 9}}}
+```
+- 주인공이 입력을 기다리는 동안 0.5초마다, 앞 요청이 돌아온 뒤에만. Python은 넘긴 명령을 지우고, 일시정지·중지·한도 도달·판 끝 중에는 `null`. 진행 중 판이 아니면 409.
 
 **관찰 패널 → Python** (A-5-5, 게임 판에서만. 둘 다 `X-Nokpixel-Bridge` 헤더 필요)
 | 주소 | 요청 | 응답 |

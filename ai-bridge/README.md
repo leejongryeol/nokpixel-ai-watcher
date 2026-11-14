@@ -140,7 +140,8 @@ python web.py --demo
 **내는 것**: 생각(글) + 도구 하나
 - `press_keys`: 키 최대 3개 (이동 wasd, 대기 space, 휴식 z, 탐색 e e 등)
 - `click`: 화면 좌표 클릭 (360×640 사진 기준. 실제 창 크기에 맞춰 바꿔서 눌러요)
-- 두 도구 모두 함께 적는 것
+- **게임 명령** (게임에서 시작한 판만, 11/15부터): `move_to(x,y)` 그 칸까지 가기(도착하거나 새 적이 보이면 멈춤), `attack(x,y)`, `pick_up(x,y 또는 발밑)`, `take_stairs(x,y)`, `rest(turn/full)`, `search`. 좌표는 [게임 정보]·[지도]의 좌표이고 가 본 적 없는 칸으로는 못 가요. 게임이 0.5초마다 명령을 가져가 실행하고(⑨), 결과는 다음 판단의 [게임 정보] "지난 명령" 줄과 기록 창의 행동 줄에 나와요. `config.json`의 `tool_set`은 `keys_click_commands` ([game-state.md](../docs/project/game-state.md) 11장)
+- 모든 도구에 함께 적는 것
   - `speech`(말풍선), `goal`(중간 목표)
   - **되새김**: `check_goal`(이 행동 → 중간 목표 → 5층 보스가 어떻게 이어지나), `basis`(근거: 화면 / 기록 / 추측)
   - `memo_add`(기억 메모 추가), `memo_remove`(틀린 메모 번호 지우기, 예: M3)

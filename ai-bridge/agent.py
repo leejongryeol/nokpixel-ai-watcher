@@ -866,7 +866,19 @@ class Agent:
                 "total_tokens": self.total_tokens,
                 "pending_hints": list(self._hints),
                 "entries": entries,
+                "game": self._game_view(),
             }
+
+    def _game_view(self):
+        """관찰 패널의 게임 상태 줄 (체력·층·배고픔·진행도). 게임이 보낸 가장 최근 상태(⑧)와 이정표로 만든다.
+        게임에서 시작한 판이 아니면 None. 관찰자용이라 AI 입력에는 들어가지 않는다."""
+        if not self._watch_game:
+            return None
+        hero = (self._last_state[1].get("hero") or {}) if self._last_state else {}
+        return {"state_seq": self._last_state[0] if self._last_state else None,
+                "hp": hero.get("hp"), "ht": hero.get("ht"), "hunger": hero.get("hunger"),
+                "depth": hero.get("depth", self.depth),
+                "points": sum(m["points"] for m in self.milestones), "points_max": MILESTONE_MAX}
 
     def receive_state(self, data):
         """⑧ 게임이 보낸 상태: states/<seq>.json에 저장하고 이정표를 판정한다. 잘못된 상태면 False."""

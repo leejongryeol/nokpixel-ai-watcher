@@ -26,8 +26,17 @@
   .thought { flex: 1; min-height: 0; overflow: auto; font-size: 20px; line-height: 1.7; }
   .row { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 16px; line-height: 1.5; }
   .row b { color: var(--muted); font-weight: 500; margin-right: 4px; }
-  .soonbox { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; }
-  .soonbox span.s { padding: 3px 8px; border: 1px dashed var(--line); border-radius: 6px; }
+  /* 게임 상태 줄: 게임이 보낸 가장 최근 상태(주인공이 입력을 기다릴 때마다)로 1초마다 바뀐다 */
+  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 12px; padding: 8px 12px; }
+  .stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 18px; font-weight: 700; font-family: var(--font-mono); white-space: nowrap; }
+  .stat b { font-size: 12px; font-weight: 500; color: var(--muted); font-family: inherit; }
+  .stat .warn { color: var(--amber); }
+  .stat .bad { color: var(--red-strong); }
+  .hpbar { display: block; height: 5px; border-radius: 999px; background: var(--panel-deep); overflow: hidden; }
+  .hpbar span { display: block; height: 100%; width: 0; background: #5fc27a; transition: width 0.3s; }
+  .hpbar span.warn { background: var(--amber); }
+  .hpbar span.bad { background: var(--red-strong); }
+  @media (max-width: 380px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .star { padding: 4px 8px; border-radius: 6px; background: var(--purple-bg); border: 1px dashed #8d77b8; color: var(--purple); font-size: 12.5px; line-height: 1.4; }
   .star.pending { opacity: 0.75; }
   #pending { display: flex; flex-direction: column; gap: 4px; }
@@ -81,10 +90,11 @@
     <details id="checkfold" class="checkfold" style="font-size: 13px"><summary>🎯 목표 연결<span id="basis" class="basis"></span></summary><div id="check" class="checkbody">—</div></details>
   </section>
 
-  <section class="soon soonbox" aria-label="준비 중인 항목">
-    <span class="s">큰 점검 알림</span><span class="s">제자리 경고</span><span class="s">개입 뒤 AI 반응</span>
-    <span class="s">체력 —/—</span><span class="s">층 —</span><span class="s">배고픔 —</span><span class="s">새 몬스터 —</span>
-    <span class="s">진행도 —/51점</span><span class="s">보스 처치 —</span><span class="soon-tag">준비 중</span>
+  <section class="stats panel" aria-label="게임 상태">
+    <div class="stat hpstat"><b>체력</b><span id="g-hp">—</span><span class="hpbar"><span id="g-hpbar"></span></span></div>
+    <div class="stat"><b>층</b><span id="g-depth">—</span></div>
+    <div class="stat"><b>배고픔</b><span id="g-hunger">—</span></div>
+    <div class="stat"><b>진행도</b><span id="g-points">—</span></div>
   </section>
 
   <form id="hintform" class="hintform panel">
@@ -94,8 +104,7 @@
       <input id="hint" type="text" placeholder="힌트를 입력하세요" autocomplete="off" disabled>
       <button id="send" type="submit" disabled>보내기</button>
     </div>
-    <span class="help" style="font-size: 12px">개입: <b id="hint-count">힌트 0회 · 일시정지 0회</b> · 입력하는 동안 AI는 다음 판단을 기다려요 (최대 60초)
-      <span class="soon" style="margin-left: 8px">개입 뒤 AI 반응 강조 <span class="soon-tag">준비 중</span></span></span>
+    <span class="help" style="font-size: 12px">개입: <b id="hint-count">힌트 0회 · 일시정지 0회</b> · 입력하는 동안 AI는 다음 판단을 기다려요 (최대 60초)</span>
   </form>
 
   <div class="buttons">
@@ -225,6 +234,24 @@ function renderPending() {
   $("pending").classList.toggle("hidden", !pending.length);
 }
 
+// 게임 상태 줄 (체력·층·배고픔·진행도). 게임에서 시작한 판만 값이 있다 (데모 설정·mvp 판은 —)
+const HUNGER_LABEL = { none: ["보통", ""], hungry: ["배고픔", "warn"], starving: ["굶주림", "bad"] };
+function renderGame(g) {
+  const ok = (v) => typeof v === "number";
+  const hpOk = g && ok(g.hp) && ok(g.ht) && g.ht > 0;
+  const ratio = hpOk ? g.hp / g.ht : 0;
+  const level = !hpOk ? "" : ratio <= 0.3 ? "bad" : ratio <= 0.5 ? "warn" : "";
+  $("g-hp").textContent = hpOk ? `${g.hp} / ${g.ht}` : "—";
+  $("g-hp").className = level;
+  $("g-hpbar").style.width = hpOk ? Math.max(0, Math.min(100, ratio * 100)) + "%" : "0";
+  $("g-hpbar").className = level;
+  $("g-depth").textContent = g && ok(g.depth) ? `${g.depth}층` : "—";
+  const [hunger, cls] = (g && HUNGER_LABEL[g.hunger]) || ["—", ""];
+  $("g-hunger").textContent = hunger;
+  $("g-hunger").className = cls;
+  $("g-points").textContent = g ? `${g.points} / ${g.points_max}점` : "—";
+}
+
 function renderNow(s) {
   const c = s.config;
   setStatus($("status"), s.status);
@@ -252,6 +279,7 @@ function renderNow(s) {
   $("note").textContent = notes.join(" / ");
   $("note").classList.toggle("hidden", !notes.length);
 
+  renderGame(s.game);
   $("final-goal").textContent = c.final_goal || '지하 5층 보스 "구(Goo)" 처치';  // 게임의 AI 설정에서 바꾼 목표
   $("goal").textContent = s.goal || "—";
   const latest = entries[entries.length - 1];

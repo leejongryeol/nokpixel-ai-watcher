@@ -28,7 +28,7 @@ from flask import Flask, abort, jsonify, redirect, request, send_from_directory
 import agent as agent_module
 import window_layout
 from agent import (MODELS, PROVIDERS, DEFAULT_MODEL, GOAL_STAGE_DEFAULT, GOAL_STAGE_LAST, LOGS_DIR, STATES_DIR,
-                   STATE_MAX_BYTES, Agent, list_runs,
+                   STATE_MAX_BYTES, Agent, credits_info, list_runs,
                    load_lessons, load_run, summarize_run)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -424,7 +424,23 @@ def bridge_ended():
     if reason == "won":  # 3단계(엔딩) 목표면 최종 목표 달성으로 끝난다
         a.game_won(int_or_none(data.get("depth")))
     a.end_game(reason, int_or_none(data.get("depth")))
-    return jsonify({"ok": True})
+    # credits: 마지막 최종 목표(엔딩)를 이룬 판이면 게임이 원작 승리 흐름 뒤에 크레딧을 보인다 (A-6-6)
+    return jsonify({"ok": True, "credits": reason == "won" and a.credits_ready()})
+
+
+@app.get("/api/bridge/credits")
+@bridge_only
+def bridge_credits():
+    """⑪ 엔딩 크레딧에 보일 그 판의 기록 (A-6-6). 지금 판이면 메모리에서, 아니면 logs의 기록에서 읽는다."""
+    run_id = os.path.basename(str(request.args.get("run_id") or ""))
+    a = current()
+    if a and a.run_id == run_id:
+        with a._lock:
+            return jsonify(credits_info(dict(a.config), list(a.entries), list(a.milestones)))
+    run = load_run(run_id) if run_id else None
+    if not run:
+        return jsonify({"ok": False, "reason": "no_run"}), 404
+    return jsonify(credits_info(run["config"], run["entries"], run["milestones"]))
 
 
 def discard_pending_dir(old, keep):

@@ -1065,6 +1065,11 @@ class Agent:
         if self.input_lock is not None:  # 사람이 창의 버튼을 누를 수 있게 잠금을 푼다 (개입이 아니라 판 진행 결정)
             self.input_lock.stop()
 
+    def credits_ready(self):
+        """마지막 최종 목표(엔딩)를 이뤘는지. ⑥ won 응답의 credits로 게임이 승리 흐름 뒤 크레딧을 보인다 (A-6-6)."""
+        return self.config.get("goal_version") == GOAL_VERSION and any(
+            g.get("stage") == GOAL_STAGE_LAST for g in self.config.get("goals_reached") or [])
+
     def goal_wait_view(self):
         """⑦·⑧ 응답의 goal_wait: 게임이 달성 창에 쓰는 값. 기다리는 중이 아니면 None."""
         w = self._goal_wait
@@ -1690,6 +1695,30 @@ def list_runs():
         if os.path.isfile(os.path.join(path, "log.jsonl")):
             runs.append(name)
     return runs
+
+
+def credits_info(config, entries, milestones):
+    """엔딩 크레딧에 보일 그 판의 기록 (A-6-6). 비용·개입은 리포트와 같은 규칙
+    (비용: 판단 기록의 cost_usd 합 / 개입: 힌트 글 수, 일시정지 + F12 비상 해제 수)."""
+    def when(text):
+        try:
+            return datetime.fromisoformat(text)
+        except (TypeError, ValueError):
+            return None
+    start, end = when(config.get("started_at")), when(config.get("ended_at")) or datetime.now()
+    return {
+        "ok": True,
+        "model_name": config.get("model_name", ""),
+        "steps": len(entries),
+        "cost_usd": round(sum(e.get("cost_usd") or 0 for e in entries), 4),
+        "hints": sum(len(e.get("hints") or []) for e in entries),
+        "pauses": len(config.get("pauses") or []) + len(config.get("unlocks") or []),
+        "seconds": max(0, int((end - start).total_seconds())) if start else 0,
+        "points": sum(m.get("points", 0) for m in milestones or []),
+        "points_max": MILESTONE_MAX,
+        "goals": [{"name": g.get("name") or g.get("goal", ""), "step": g.get("step", 0), "simulated": bool(g.get("simulated"))}
+                  for g in config.get("goals_reached") or []],
+    }
 
 
 def load_run(run_id):

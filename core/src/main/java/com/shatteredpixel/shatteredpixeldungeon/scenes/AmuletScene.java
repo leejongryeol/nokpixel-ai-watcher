@@ -21,6 +21,7 @@
 
 package com.shatteredpixel.shatteredpixeldungeon.scenes;
 
+import com.shatteredpixel.shatteredpixeldungeon.AIBridge;
 import com.shatteredpixel.shatteredpixeldungeon.Assets;
 import com.shatteredpixel.shatteredpixeldungeon.Badges;
 import com.shatteredpixel.shatteredpixeldungeon.Chrome;
@@ -91,11 +92,11 @@ public class AmuletScene extends PixelScene {
 							AmuletScene.this.add(new Delayer(3f){
 								@Override
 								protected void onComplete() {
-									Game.switchScene( RankingsScene.class );
+									Game.switchScene( AIBridge.afterVictory() ); //[nokpixel-ai-watcher] AI 엔딩 목표를 이룬 판은 크레딧 (A-6-6)
 								}
 							});
 						} else {
-							Game.switchScene( RankingsScene.class );
+							Game.switchScene( AIBridge.afterVictory() ); //[nokpixel-ai-watcher] AI 엔딩 목표를 이룬 판은 크레딧 (A-6-6)
 						}
 					}
 				});

@@ -42,8 +42,11 @@ import com.shatteredpixel.shatteredpixeldungeon.levels.Level;
 import com.shatteredpixel.shatteredpixeldungeon.levels.Terrain;
 import com.shatteredpixel.shatteredpixeldungeon.levels.features.LevelTransition;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
+import com.shatteredpixel.shatteredpixeldungeon.scenes.AICreditsScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.InterlevelScene;
+import com.shatteredpixel.shatteredpixeldungeon.scenes.PixelScene;
+import com.shatteredpixel.shatteredpixeldungeon.scenes.RankingsScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.TitleScene;
 import com.shatteredpixel.shatteredpixeldungeon.utils.DungeonSeed;
 import com.shatteredpixel.shatteredpixeldungeon.utils.GLog;
@@ -477,25 +480,44 @@ public class AIBridge {
 
 	//⑥ 승리·타이틀로 나가기·게임 종료: GameScene.destroy()에서 불린다
 	//층을 옮길 때는 InterlevelScene.mode를 NONE이 아닌 값으로 정한 뒤 장면을 바꾸므로 판 끝이 아니다
+	//승리: 아뮬렛을 주우면 바로 아뮬렛 화면으로 넘어가고, gameWon은 그 화면의 [던전을 나간다]에서야 참이 된다.
+	//그래서 아뮬렛을 얻은 채 던전 화면을 떠나는 것도 승리로 본다 (A-6-6. AI 판은 1층 새 판에서 시작하고 이때 끝난다)
 	public static void onLeaveGame(){
 		if (InterlevelScene.mode != InterlevelScene.Mode.NONE) return;
 		pendingRunId = null;
-		end(Statistics.gameWon ? "won" : "quit");
+		end(Statistics.gameWon || Statistics.amuletObtained ? "won" : "quit");
 	}
 
 	private static void end(String reason){
 		if (activeRunId == null) return;
+		final String runId = activeRunId;
 		JsonValue body = object();
-		body.addChild("run_id", new JsonValue(activeRunId));
+		body.addChild("run_id", new JsonValue(runId));
 		body.addChild("reason", new JsonValue(reason));
 		body.addChild("depth", new JsonValue(Dungeon.depth));
 		activeRunId = null; //판이 끝났으므로 신호도 멈춘다. 닿지 않아도 신호가 끊겨서 Python은 키를 보내지 않는다
 		post("/api/bridge/ended", body, SHORT_TIMEOUT, new Listener() {
 			@Override
 			public void onResult(JsonValue result) {
-				//결과와 관계없이 게임은 그대로 진행한다
+				//결과와 관계없이 게임은 그대로 진행한다. 마지막 최종 목표(엔딩)를 이뤘으면 승리 흐름 뒤에 크레딧을 보인다 (A-6-6)
+				if (result != null && result.getBoolean("credits", false)) creditsRunId = runId;
 			}
 		});
+	}
+
+	//엔딩 크레딧 (A-6-6): ⑥ won 응답이 credits면 그 판 번호를 둔다. 아뮬렛 화면 [던전을 나간다] 뒤에 쓴다
+	private static String creditsRunId = null;
+
+	//원작 승리 흐름의 다음 장면: 크레딧을 보일 판이면 AICreditsScene, 아니면 원작대로 순위 화면
+	public static Class<? extends PixelScene> afterVictory(){
+		return creditsRunId != null ? AICreditsScene.class : RankingsScene.class;
+	}
+
+	//크레딧 장면이 한 번 가져가고 지운다
+	public static String takeCreditsRunId(){
+		String id = creditsRunId;
+		creditsRunId = null;
+		return id;
 	}
 
 	private static void heartbeat(){
@@ -623,6 +645,7 @@ public class AIBridge {
 				if (result != null && result.getBoolean("ok", false)) {
 					resetState(); //⑧ 상태 번호와 비교 값을 새 판으로 (다음 프레임에 첫 상태 start를 보낸다)
 					SPDSettings.aiGoalMark(GamesInProgress.curSlot, Dungeon.seed, ""); //이 슬롯의 지난 판 달성 표시를 지운다 (A-6-6)
+					creditsRunId = null; //지난 판의 보이지 않은 크레딧은 버린다
 					activeRunId = runId;
 					sinceHeartbeat = HEARTBEAT_EVERY; //첫 신호를 바로 보낸다
 					deathSent = false;

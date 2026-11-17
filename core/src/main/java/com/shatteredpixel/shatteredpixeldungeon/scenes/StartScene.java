@@ -272,7 +272,7 @@ public class StartScene extends PixelScene {
 					depth.resetColor();
 					level.resetColor();
 				}
-				if (aiGoal != null) { lastPlayed.text(Messages.get(StartScene.class, "ai_goal", aiGoal)); lastPlayed.hardlight(Window.TITLE_COLOR); }
+				if (aiGoal != null) { lastPlayed.text(Messages.get(StartScene.class, "ai_goal")); lastPlayed.hardlight(Window.TITLE_COLOR); }
 
 				if (info.daily){
 					if (info.dailyReplay){

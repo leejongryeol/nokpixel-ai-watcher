@@ -486,7 +486,6 @@ public class SPDSettings extends GameSettings {
 	public static final String KEY_AI_STEPS         = "ai_steps";
 	public static final String KEY_AI_LESSONS_FROM  = "ai_lessons_from";
 	public static final String KEY_AI_PLAYER        = "ai_player";
-	public static final String KEY_AI_GOAL          = "ai_goal";
 
 	public static void aiModel( String value ){
 		put( KEY_AI_MODEL, value );
@@ -534,15 +533,6 @@ public class SPDSettings extends GameSettings {
 
 	public static String aiPlayer(){
 		return getString( KEY_AI_PLAYER, "player", 16 );
-	}
-
-	//비어 있으면 기본 최종 목표(지하 5층 보스 처치)를 쓴다
-	public static void aiGoal( String value ){
-		put( KEY_AI_GOAL, value );
-	}
-
-	public static String aiGoal(){
-		return getString( KEY_AI_GOAL, "", 100 );
 	}
 
 	//[nokpixel-ai-watcher] 슬롯마다 AI가 이룬 최종 목표 (A-6-6). 저장 파일 형식은 바꾸지 않고 설정에 "시드|목표 이름"으로 둔다.

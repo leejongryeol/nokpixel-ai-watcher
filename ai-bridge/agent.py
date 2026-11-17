@@ -75,14 +75,32 @@ END_REASONS = {"died": "캐릭터가 죽음", "won": "승리", "quit": "게임 �
                "max_steps": "정해진 판단 횟수를 다 씀", "stopped": "관찰자가 중지함", "error": "오류로 멈춤",
                "goal_reached": "최종 목표 달성"}
 
-MODELS = {  # price: 100만 토큰당 (입력, 출력) 달러
-    "claude-haiku-4-5-20251001": {"name": "Haiku 4.5", "provider": "anthropic", "price": (1.0, 5.0)},
-    "claude-sonnet-5-5": {"name": "Sonnet 5.5", "provider": "anthropic", "price": (2.0, 10.0)},
-    "claude-opus-5-5": {"name": "Opus 5.5", "provider": "anthropic", "price": (4.0, 20.0)},
-    "gpt-6-luna": {"name": "GPT-6 Luna", "provider": "openai", "price": (0.10, 0.50)},
-    "gpt-6.1-sol": {"name": "GPT-6.1 Sol", "provider": "openai", "price": (2.0, 10.0)},
-    "gpt-6-astra": {"name": "GPT-6 Astra", "provider": "openai", "price": (10.0, 50.0)},
+# price: 100만 토큰당 (입력, 출력) 달러. cache_read: 캐시에서 읽은 입력의 100만 토큰당 달러 (A-6-7)
+# 캐시 가격 출처 (2026-11-18 확인):
+#   Claude: https://platform.claude.com/docs/en/about-claude/pricing "Cache hits and refreshes"
+#           Haiku 4.5 $0.10, Sonnet 5.5 $0.10, Opus 5.5 $0.20. 5분 캐시 쓰기는 입력의 1.25배
+#   OpenAI: https://developers.openai.com/api/docs/pricing "Short context cached input" luna $0.01, sol $0.10, astra $1.00
+#           https://developers.openai.com/api/docs/guides/prompt-caching 기본 30분 캐시 쓰기는 입력의 1.25배
+MODELS = {
+    "claude-haiku-4-5-20251001": {"name": "Haiku 4.5", "provider": "anthropic", "price": (1.0, 5.0), "cache_read": 0.10},
+    "claude-sonnet-5-5": {"name": "Sonnet 5.5", "provider": "anthropic", "price": (2.0, 10.0), "cache_read": 0.10},
+    "claude-opus-5-5": {"name": "Opus 5.5", "provider": "anthropic", "price": (4.0, 20.0), "cache_read": 0.20},
+    "gpt-6-luna": {"name": "GPT-6 Luna", "provider": "openai", "price": (0.10, 0.50), "cache_read": 0.01},
+    "gpt-6.1-sol": {"name": "GPT-6.1 Sol", "provider": "openai", "price": (2.0, 10.0), "cache_read": 0.10},
+    "gpt-6-astra": {"name": "GPT-6 Astra", "provider": "openai", "price": (10.0, 50.0), "cache_read": 1.00},
 }
+CACHE_WRITE_RATE = 1.25  # 캐시에 쓴 입력은 보통 입력 가격의 1.25배 (Claude 5분, OpenAI 30분. 위 출처)
+
+
+def usage_cost(model, usage):
+    """판단 한 번의 비용(달러). input_tokens는 캐시를 포함한 전체 입력이다 (A-6-7).
+    보통 입력 = 전체 - 캐시에서 읽음 - 캐시에 씀. 캐시 칸이 없는 사용량(데모 등)은 모두 보통 입력으로 셈."""
+    info = MODELS.get(model) or MODELS[DEFAULT_MODEL]
+    price_in, price_out = info["price"]
+    cached, written = usage.get("cached_tokens", 0) or 0, usage.get("cache_write_tokens", 0) or 0
+    plain = max(0, usage["input_tokens"] - cached - written)
+    return (plain * price_in + cached * info["cache_read"] + written * price_in * CACHE_WRITE_RATE
+            + usage["output_tokens"] * price_out) / 1_000_000
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 PROVIDERS = {  # cheap_model: 연결 테스트·리포트 요약에 쓰는 가장 저렴한 모델
     "anthropic": {"name": "Claude", "key_env": "ANTHROPIC_API_KEY", "cheap_model": "claude-haiku-4-5-20251001"},
@@ -159,7 +177,7 @@ COMMAND_RULES = """- 이동·공격·줍기·계단·쉬기·탐색은 명령을
 - move_to는 도착하거나 새 적이 보이면 멈춘다. 명령 한 번에 여러 턴이 지날 수 있다
 - 명령을 실행하지 못하면 다음 [게임 정보]에 이유가 나온다
 - plan(commands): 위 명령 1~5개를 순서대로 묶어 한 번에 낸다. 새 적이 보이거나, 체력이 줄거나, 창이 뜨거나, 층이 바뀌거나, 명령을 실행하지 못하면 남은 명령은 버리고 그때 다시 판단한다"""
-RULES_VERSION = 3  # 게임 판 규칙 글 버전. 2: 명령 설명을 키 설명 앞으로 + "명령을 먼저 쓴다" 한 줄 (A-6-6) / 3: plan 한 줄 (A-6-7)
+RULES_VERSION = 3  # 게임 판 규칙 글 버전. 2: 명령 설명을 키 설명 앞으로 + "명령을 먼저 쓴다" 한 줄 (A-6-6) / 3: plan 한 줄 + [이번 판]을 맨 뒤로 (A-6-7)
 COMMAND_STATE_WAIT = 30  # 명령을 낸 뒤 새 상태(seq가 더 큼)를 기다리는 최대 시간(초). 긴 이동·쉬기. 묶음은 명령 수만큼 곱한다
 PLAN_MAX = 5  # 명령 묶음에 넣을 수 있는 명령 수 (게임의 AIBridge.PLAN_MAX와 같음)
 # 명령 묶음에서 남은 명령을 버린 이유 (A-6-7, game-state.md 3-5). 앞 6개는 게임이 보는 사건, 뒤는 Python이 이어 가지 말라고 한 이유
@@ -574,9 +592,10 @@ def _openai_tool(tool):
 class LLM:
     """모델 하나를 부르는 창구. content는 ("text", 글) / ("image", PIL 이미지) 목록."""
 
-    def __init__(self, model, timeout=None):
-        """timeout(초)을 주면 다시 시도하지 않고 그 시간 안에 끝낸다 (연결 시험용)."""
+    def __init__(self, model, timeout=None, cache_key=None):
+        """timeout(초)을 주면 다시 시도하지 않고 그 시간 안에 끝낸다 (연결 시험용). cache_key: OpenAI 캐시 묶음 이름 (판 번호)."""
         self.model = model if model in MODELS else DEFAULT_MODEL
+        self.cache_key = cache_key
         self.provider = MODELS[self.model]["provider"]
         options = {"timeout": timeout, "max_retries": 0} if timeout else {}
         if self.provider == "openai":
@@ -597,7 +616,7 @@ class LLM:
                  {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": to_base64_png(value)}}
                  for kind, value in content]
         kwargs = {"model": self.model, "max_tokens": max_tokens, "messages": [{"role": "user", "content": parts}]}
-        if system:
+        if system:  # 캐시 표시는 고정 앞부분(도구 → 규칙)의 끝에 둔다. 판단마다 바뀌는 글·화면은 그 뒤 (A-6-7)
             kwargs["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
         if tools:
             kwargs["tools"] = tools
@@ -605,7 +624,11 @@ class LLM:
         text = " ".join(b.text.strip() for b in response.content if b.type == "text").strip()
         tool = next((b for b in response.content if b.type == "tool_use"), None)
         action = {"tool": tool.name, "input": dict(tool.input)} if tool else None
-        usage = {"input_tokens": response.usage.input_tokens, "output_tokens": response.usage.output_tokens}
+        # Claude의 input_tokens는 캐시 밖의 입력만이다. 기록은 OpenAI처럼 전체 입력으로 맞춘다 (A-6-7)
+        u = response.usage
+        cached, written = u.cache_read_input_tokens or 0, u.cache_creation_input_tokens or 0
+        usage = {"input_tokens": u.input_tokens + cached + written, "output_tokens": u.output_tokens,
+                 "cached_tokens": cached, "cache_write_tokens": written}
         return text, action, usage
 
     def _ask_openai(self, content, max_tokens, system, tools):
@@ -615,10 +638,12 @@ class LLM:
         kwargs = {"model": self.model, "input": [{"role": "user", "content": parts}],
                   "max_output_tokens": max_tokens + 2048,  # 속으로 생각하는 추론 토큰도 여기에 포함된다
                   "reasoning": {"effort": OPENAI_REASONING_EFFORT}}
-        if system:
+        if system:  # OpenAI는 앞부분이 글자까지 같으면 자동으로 캐시한다 (A-6-7). 규칙·도구는 판 동안 바뀌지 않는다
             kwargs["instructions"] = system
         if tools:
             kwargs.update(tools=[_openai_tool(t) for t in tools], tool_choice="required", parallel_tool_calls=False)
+        if self.cache_key:  # 같은 판의 요청을 같은 캐시로 보내 달라는 표시 (가격과는 상관없음)
+            kwargs["prompt_cache_key"] = self.cache_key
         response = self.client.responses.create(**kwargs)
         text = (response.output_text or "").strip()
         call = next((o for o in response.output if o.type == "function_call"), None)
@@ -628,7 +653,11 @@ class LLM:
             thought = str(inp.pop("thought", "") or "").strip()
             text = text or thought
             action = {"tool": call.name, "input": inp}
-        usage = {"input_tokens": response.usage.input_tokens, "output_tokens": response.usage.output_tokens}
+        u = response.usage
+        details = getattr(u, "input_tokens_details", None)
+        usage = {"input_tokens": u.input_tokens, "output_tokens": u.output_tokens,  # input_tokens는 캐시를 포함한 전체
+                 "cached_tokens": getattr(details, "cached_tokens", 0) or 0,
+                 "cache_write_tokens": getattr(details, "cache_write_tokens", 0) or 0}
         return text, action, usage
 
 
@@ -1443,7 +1472,9 @@ class Agent:
         return tools
 
     def system_prompt(self):
-        """AI에게 주는 규칙. 순서: 규칙 → [이번 판](게임에서 시작한 판만) → 공략 → 교훈."""
+        """AI에게 주는 규칙. 판 동안 바뀌지 않는 앞부분이라 캐시된다 (A-6-7).
+        순서: 규칙 → 공략 → 교훈 → [이번 판](게임에서 시작한 판만). 도구 설명은 API가 이 글 앞에 둔다.
+        판단마다 바뀌는 것(최근 기록·중간 목표·메모·게임 정보·지도·화면·요청 글)은 판단 요청(_ask)에만 넣는다."""
         system = SYSTEM_PROMPT
         goal = self.custom_goal()
         if goal:  # 기본 목표 문장만 바꾼다
@@ -1451,10 +1482,6 @@ class Agent:
         if self._watch_game:  # 게임에서 시작한 판은 [조작법] 맨 앞에 명령 설명, 판단마다 [게임 정보]·[지도]도 받는다
             system = system.replace("[조작법]\n", "[조작법]\n" + COMMAND_RULES + "\n", 1)
             system += "\n\n" + GAME_DATA_RULES
-        if self.config.get("started_from") == "game":  # 화면에 보이는 직업·제약 이름만. 시드는 넣지 않는다
-            system += "\n\n[이번 판]\n직업: " + (self.config.get("hero_title") or self.config.get("hero_class") or "?")
-            if self.config.get("challenge_titles"):
-                system += "\n제약: " + ", ".join(self.config["challenge_titles"])
         if self.config["guide"]:
             guide = load_guide()
             if guide:
@@ -1463,6 +1490,10 @@ class Agent:
             system += ("\n\n[지난 판의 네가 남긴 교훈]\n"
                        "지난 판에서 네가 직접 겪고 쓴 교훈이다. 이번 판에서 틀린 것으로 보이면 따르지 않아도 된다.\n"
                        + self.inherited_lessons)
+        if self.config.get("started_from") == "game":  # 화면에 보이는 직업·제약 이름만. 시드는 넣지 않는다 (A-6-7부터 맨 뒤)
+            system += "\n\n[이번 판]\n직업: " + (self.config.get("hero_title") or self.config.get("hero_class") or "?")
+            if self.config.get("challenge_titles"):
+                system += "\n제약: " + ", ".join(self.config["challenge_titles"])
         return system
 
     def run(self):
@@ -1486,7 +1517,7 @@ class Agent:
             if self.input_lock is not None:  # 실패해도 판은 진행한다 (관찰 화면에 🔓와 이유가 보임)
                 self.input_lock.start(game.hwnd)
             if not self.config["demo"]:
-                client = LLM(self.config["model"])
+                client = LLM(self.config["model"], cache_key=self.run_id)
             system = self.system_prompt()
             system_goal = self.config.get("final_goal")
 
@@ -1729,8 +1760,7 @@ class Agent:
     def _discard(self, usage, hints, game_data=None):
         """일시정지로 버린 판단: 기록(log.jsonl)에는 남기지 않고, 든 비용만 합계와 config.json의 pauses에 더한다.
         받은 힌트와 게임 메시지는 다음 판단에 다시 준다."""
-        price_in, price_out = MODELS[self.config["model"]]["price"]
-        cost = (usage["input_tokens"] * price_in + usage["output_tokens"] * price_out) / 1_000_000
+        cost = usage_cost(self.config["model"], usage)
         with self._lock:
             self.total_cost += cost
             self.total_tokens += usage["input_tokens"] + usage["output_tokens"]
@@ -1759,8 +1789,7 @@ class Agent:
             return None
 
     def _record(self, step, image_name, thought, action, usage, hints, checkpoint, game_data=None):
-        price_in, price_out = MODELS[self.config["model"]]["price"]
-        cost = (usage["input_tokens"] * price_in + usage["output_tokens"] * price_out) / 1_000_000
+        cost = usage_cost(self.config["model"], usage)
         inp = action["input"] if action else {}
         goal = (inp.get("goal") or "").strip()
         memo_add = (inp.get("memo_add") or "").strip()
@@ -1795,6 +1824,8 @@ class Agent:
                 "action_text": describe_action(action),
                 "input_tokens": usage["input_tokens"],
                 "output_tokens": usage["output_tokens"],
+                "cached_tokens": usage.get("cached_tokens", 0),  # 입력 중 캐시에서 읽은 토큰 (A-6-7)
+                "cache_write_tokens": usage.get("cache_write_tokens", 0),  # 입력 중 캐시에 쓴 토큰
                 "cost_usd": round(cost, 6),
             }
             if game_data is not None:  # 게임에서 시작한 판만 (mvp.py 판의 줄 모양은 그대로)
@@ -1896,9 +1927,8 @@ class Agent:
                 if client is None:
                     client = LLM(self.config["model"])
                 lessons, usage = self._ask_lessons(client, ending, image)
-                price_in, price_out = MODELS[self.config["model"]]["price"]
                 with self._lock:
-                    self.total_cost += (usage["input_tokens"] * price_in + usage["output_tokens"] * price_out) / 1_000_000
+                    self.total_cost += usage_cost(self.config["model"], usage)
                     self.total_tokens += usage["input_tokens"] + usage["output_tokens"]
             with open(os.path.join(self.run_dir, LESSONS_FILE), "w", encoding="utf-8") as f:
                 f.write(lessons + "\n")

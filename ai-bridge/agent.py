@@ -98,16 +98,16 @@ def key_env(model):
 # 최종 목표 기본값. AI 설정에서 바꾸지 않은 판은 아래 문구가 글자 그대로 들어간다 (지난 판과 비교)
 DEFAULT_GOAL = "지하 5층의 보스를 처치하는 것"
 DEFAULT_GOAL_SHORT = "5층 보스 처치"
-# 최종 목표 단계 (A-6-4, 게임의 AI 설정에서 고름). (AI에게 주는 문장, 짧은 이름). 보스 이름은 게임 화면의 한국어 이름 그대로.
-# 1단계 문장은 11/14 전 기본 목표(DEFAULT_GOAL)와 "구" 한 단어가 다르다 (config.json의 goal_stage로 구분)
+# 최종 목표 단계 (A-6-6, 게임의 AI 설정에서 고름). (AI에게 주는 문장, 짧은 이름, 판정). 보스 이름은 게임 화면의 한국어 이름 그대로.
+# 판정: "door" 문 칸에 처음 들어섬 / 숫자 그 층 보스 처치 / "won" 승리(아뮬렛 화면에 들어섬)
+# 1단계 문장은 A-6-4의 1단계와 같고, 11/14 전 기본 목표(DEFAULT_GOAL)와는 "구" 한 단어가 다르다.
+# A-6-4 판(0~6 단계)과 번호 뜻이 다르므로 새 판의 config.json에는 goal_version 2와 goal_name을 남긴다
+GOAL_VERSION = 2
 GOAL_STAGES = [
-    ("문을 열고 통과하는 것", "문 통과 (시험용)"),
-    ("지하 5층의 보스 구를 처치하는 것", "5층 보스 구"),
-    ("지하 10층의 보스 텐구 암살자를 처치하는 것", "10층 보스 텐구 암살자"),
-    ("지하 15층의 보스 DM-300을 처치하는 것", "15층 보스 DM-300"),
-    ("지하 20층의 보스 드워프 제왕을 처치하는 것", "20층 보스 드워프 제왕"),
-    ("지하 25층의 보스 요그제바를 처치하는 것", "25층 보스 요그제바"),
-    ("게임의 엔딩을 보는 것", "엔딩"),
+    ("문을 열고 통과하는 것", "문 통과 (시험용)", "door"),
+    ("지하 5층의 보스 구를 처치하는 것", "5층 보스 구", 5),
+    ("지하 25층의 최종 보스 요그제바를 처치하는 것", "최종 보스 요그제바", 25),
+    ("게임의 엔딩을 보는 것", "엔딩", "won"),
 ]
 GOAL_STAGE_DEFAULT = 1
 GOAL_STAGE_LAST = len(GOAL_STAGES) - 1
@@ -778,7 +778,8 @@ class Agent:
             self.config.update(game_run, started_from="game")
             if isinstance(game_run.get("goal_stage"), int):  # 최종 목표 단계 (A-6-4). 문장은 기존 final_goal 경로로 AI 입력에 들어간다
                 stage = game_run["goal_stage"]
-                self.config.update(goal_stage_now=stage, final_goal=GOAL_STAGES[stage][0], goals_reached=[])
+                self.config.update(goal_version=GOAL_VERSION, goal_stage_now=stage, goal_name=GOAL_STAGES[stage][1],
+                                   final_goal=GOAL_STAGES[stage][0], goals_reached=[])
         # AI가 받은 정보: 게임에서 시작한 판은 화면 + 게임 데이터, mvp.py·옛 설정 화면 판은 화면만 (이 칸이 없는 옛 기록은 screen)
         self.config["ai_input"] = "screen_data" if game_run else "screen"
         if game_run:  # 게임 데이터 글 버전 (이 칸이 없는 screen_data 기록은 1)
@@ -1026,39 +1027,32 @@ class Agent:
         return True
 
     def game_won(self, depth):
-        """⑥ won: 지금 단계가 6(엔딩)이면 최종 목표 달성으로 기록한다."""
+        """⑥ won: 지금 단계가 3(엔딩)이면 최종 목표 달성으로 기록한다."""
         with self._lock:
             self._judge_goal({}, depth, won=True)
 
     def _judge_goal(self, record, depth, won=False):
-        """지금 최종 목표 단계를 이뤘는지 본다 (self._lock 안에서 부른다). 0: 문 칸에 처음 들어섬, 1~5: 그 층 보스 처치, 6: 승리.
-        이뤘으면 goals_reached에 남기고, 다음 목표로(next)면 단계를 올리고 다음 판단에 알림을 한 번 준다. 끝내기(end)·6단계면 판을 끝낸다."""
-        if "goal_stage_now" not in self.config or self.end_reason:
+        """지금 최종 목표 단계를 이뤘는지 본다 (self._lock 안에서 부른다). 판정은 GOAL_STAGES의 세 번째 값.
+        이뤘으면 goals_reached에 남기고 판을 끝낸다."""
+        if self.config.get("goal_version") != GOAL_VERSION or self.end_reason:
             return
         bosses = record.get("bosses_slain") if isinstance(record.get("bosses_slain"), list) else []
-        while True:
-            stage = self.config["goal_stage_now"]
-            if stage == 0:
-                hit = record.get("door_passed") is True
-            elif stage < GOAL_STAGE_LAST:
-                hit = stage * 5 in bosses
-            else:
-                hit = won
-            if not hit:
-                return
-            goal = GOAL_STAGES[stage][0]
-            self.config["goals_reached"].append({"stage": stage, "goal": goal, "step": self.step,
-                                                 "at": datetime.now().isoformat(timespec="seconds"), "depth": depth})
-            if self.config.get("on_goal") == "next" and stage < GOAL_STAGE_LAST:
-                self._goal_notice_from.append(goal)
-                self.config.update(goal_stage_now=stage + 1, final_goal=GOAL_STAGES[stage + 1][0])
-                self._save_config()
-                continue  # 바로 다음 단계도 이미 이뤘는지 본다
-            self._save_config()
-            if not won:  # 엔딩은 게임이 이미 엔딩 화면으로 가므로 타이틀로 보내지 않는다
-                self._title = "wait"
-            self.end_game("goal_reached", depth)
+        stage = self.config["goal_stage_now"]
+        goal, name, judge = GOAL_STAGES[stage]
+        if judge == "door":
+            hit = record.get("door_passed") is True
+        elif judge == "won":
+            hit = won
+        else:
+            hit = judge in bosses
+        if not hit:
             return
+        self.config["goals_reached"].append({"stage": stage, "name": name, "goal": goal, "step": self.step,
+                                             "at": datetime.now().isoformat(timespec="seconds"), "depth": depth})
+        self._save_config()
+        if not won:  # 엔딩은 게임이 이미 엔딩 화면으로 가므로 타이틀로 보내지 않는다
+            self._title = "wait"
+        self.end_game("goal_reached", depth)
 
     def wants_commands(self):
         """⑧ 응답의 want_command: 게임에서 시작한 판은 명령 도구를 쓰므로 게임이 ⑨로 묻게 한다."""

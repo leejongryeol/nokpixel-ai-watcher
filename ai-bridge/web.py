@@ -288,8 +288,7 @@ def bridge_run():
         game_run = {
             "hero_class": clean_id(data.get("hero_class"), 20),
             "hero_title": clean_name(data.get("hero_title"), 20),
-            "goal_stage": goal_stage(data.get("goal_stage")),  # 최종 목표 단계 0~6 (A-6-4). 문장은 agent.py GOAL_STAGES
-            "on_goal": "next" if data.get("on_goal") == "next" else "end",  # 달성하면: 다음 목표로 / 끝내기(기본)
+            "goal_stage": goal_stage(data.get("goal_stage")),  # 최종 목표 단계 0~3 (A-6-6). 문장은 agent.py GOAL_STAGES
             "challenges": challenges,
             "challenge_names": [clean_id(n, 40) for n in names][:20] if isinstance(names, list) else [],
             "challenge_titles": [t for t in (clean_name(n, 40) for n in titles) if t][:20] if isinstance(titles, list) else [],
@@ -331,7 +330,7 @@ def bridge_arrived():
 
 
 def goal_stage(value):
-    """④의 goal_stage: 0~6 정수만. 그 밖은 기본(1: 5층 보스)."""
+    """④의 goal_stage: 0~3 정수만. 그 밖은 기본(1: 5층 보스 구)."""
     return value if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= GOAL_STAGE_LAST \
         else GOAL_STAGE_DEFAULT
 
@@ -408,7 +407,7 @@ def bridge_ended():
     a = running_agent(data.get("run_id"))
     if not a:
         return jsonify({"ok": False, "reason": "not_running"}), 409
-    if reason == "won":  # 6단계(엔딩) 목표면 최종 목표 달성으로 끝난다
+    if reason == "won":  # 3단계(엔딩) 목표면 최종 목표 달성으로 끝난다
         a.game_won(int_or_none(data.get("depth")))
     a.end_game(reason, int_or_none(data.get("depth")))
     return jsonify({"ok": True})

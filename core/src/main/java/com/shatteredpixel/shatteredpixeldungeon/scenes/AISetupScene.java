@@ -54,11 +54,12 @@ public class AISetupScene extends PixelScene {
 	private static final float STATUS_EVERY = 3f; //장면에 있는 동안 상태 조회 간격(초)
 	private static final int LESSONS_MAX = 8; //교훈 고르기 창에 보여 줄 최근 판 수
 	private static final float LAUNCH_WAIT = 20f; //[AI 관찰기 켜기] 뒤 연결을 기다리는 최대 시간(초)
-	//최종 목표 단계 (A-6-4): 0 문 통과(시험용) · 1~5 5·10·15·20·25층 보스 · 6 엔딩. 목표 문장은 Python(agent.py GOAL_STAGES)이 정한다.
-	//SPDSettings에 함수를 더하지 않고 상속된 getInt/put으로 저장한다
-	private static final String KEY_GOAL_STAGE = "ai_goal_stage";
-	private static final String KEY_ON_GOAL = "ai_on_goal_next"; //달성하면: 참이면 다음 목표로, 거짓이면 끝내기(기본)
-	private static final int GOAL_STAGE_MAX = 6;
+	//최종 목표 단계 (A-6-6): 0 문 통과(시험용) · 1 5층 보스 구 · 2 최종 보스(25층) · 3 엔딩. 목표 문장은 Python(agent.py GOAL_STAGES)이 정한다.
+	//달성한 뒤 어떻게 할지는 달성할 때 게임 안 창(WndAIGoal)에서 사람이 고른다.
+	//SPDSettings에 함수를 더하지 않고 상속된 getInt/put으로 저장한다.
+	//A-6-4의 0~6 단계 값(ai_goal_stage)과 번호 뜻이 달라서 새 이름으로 저장한다 (옛 값이 다른 목표로 바뀌어 보이지 않게)
+	private static final String KEY_GOAL_STAGE = "ai_goal_stage_v2";
+	private static final int GOAL_STAGE_MAX = 3;
 	private static final int GOAL_STAGE_DEFAULT = 1;
 
 	private StyledButton btnWatcher;
@@ -68,7 +69,6 @@ public class AISetupScene extends PixelScene {
 	private StyledButton btnKey;
 	private StyledButton btnTest;
 	private StyledButton btnGoal;
-	private StyledButton btnOnGoal;
 	private StyledButton btnSteps;
 	private StyledButton btnLessons;
 	private StyledButton btnPlayer;
@@ -182,7 +182,7 @@ public class AISetupScene extends PixelScene {
 		//묶음 2: 실험 옵션
 		pos = section(Messages.get(this, "section_options"), left, pos, width);
 
-		//최종 목표 단계와 달성 뒤 처리는 누를 때마다 바뀐다 (공략 버튼과 같은 방식). 글자가 짧아서 한 줄에 반씩 둔다 (세로 화면 자리)
+		//최종 목표 단계는 누를 때마다 바뀐다 (공략 버튼과 같은 방식)
 		btnGoal = button("", new Runnable() {
 			@Override
 			public void run() {
@@ -190,17 +190,7 @@ public class AISetupScene extends PixelScene {
 				flash = Messages.get(AISetupScene.class, "goal_set", goalLabel(goalStage()));
 			}
 		});
-		btnGoal.setRect(left, pos, half, BTN_HEIGHT);
-		align(btnGoal);
-		btnOnGoal = button("", new Runnable() {
-			@Override
-			public void run() {
-				SPDSettings.put(KEY_ON_GOAL, !SPDSettings.getBoolean(KEY_ON_GOAL, false));
-			}
-		});
-		btnOnGoal.setRect(left + half + GAP, pos, half, BTN_HEIGHT);
-		align(btnOnGoal);
-		pos += BTN_HEIGHT + GAP;
+		pos = place(btnGoal, left, pos, width);
 
 		btnLessons = button("", new Runnable() {
 			@Override
@@ -420,8 +410,7 @@ public class AISetupScene extends PixelScene {
 		body.addChild("dry_run", new JsonValue(false)); //게임에서 시작하는 AI 판은 언제나 실제 조작 (생각만 하기는 mvp.py --dry-run)
 		body.addChild("steps", new JsonValue(SPDSettings.aiSteps()));
 		body.addChild("lessons_from", new JsonValue(SPDSettings.aiLessonsFrom()));
-		body.addChild("goal_stage", new JsonValue(goalStage())); //최종 목표 단계 0~6 (A-6-4)
-		body.addChild("on_goal", new JsonValue(SPDSettings.getBoolean(KEY_ON_GOAL, false) ? "next" : "end"));
+		body.addChild("goal_stage", new JsonValue(goalStage())); //최종 목표 단계 0~3 (A-6-6)
 		body.addChild("hero_class", new JsonValue(GamesInProgress.selectedClass != null ? GamesInProgress.selectedClass.name() : ""));
 		//AI 입력의 [이번 판]에 쓰는 이름: 게임 화면에 보이는 언어 그대로
 		body.addChild("hero_title", new JsonValue(GamesInProgress.selectedClass != null ? GamesInProgress.selectedClass.title() : ""));
@@ -556,7 +545,6 @@ public class AISetupScene extends PixelScene {
 		btnTest.enable(online && !running && !testing && !starting && key != null && key.getBoolean("present", false));
 
 		btnGoal.text(Messages.get(this, "goal", goalLabel(goalStage())));
-		btnOnGoal.text(Messages.get(this, "on_goal", Messages.get(this, SPDSettings.getBoolean(KEY_ON_GOAL, false) ? "on_goal_next" : "on_goal_end")));
 		btnSteps.text(Messages.get(this, "steps", SPDSettings.aiSteps()));
 
 		String lessons = SPDSettings.aiLessonsFrom();
@@ -677,7 +665,7 @@ public class AISetupScene extends PixelScene {
 		});
 	}
 
-	//최종 목표 단계 (0~6). 저장값이 범위를 벗어나면 기본(1: 5층 보스)
+	//최종 목표 단계 (0~3). 저장값이 범위를 벗어나면 가까운 끝 값으로 (getInt 범위 처리)
 	private static int goalStage() {
 		return SPDSettings.getInt(KEY_GOAL_STAGE, GOAL_STAGE_DEFAULT, 0, GOAL_STAGE_MAX);
 	}

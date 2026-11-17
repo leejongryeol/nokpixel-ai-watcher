@@ -214,10 +214,11 @@ $("hintform").addEventListener("submit", async (event) => {
 const END_LABEL = { died: "사망으로 끝남", won: "승리", quit: "타이틀로 나가서 끝남", game_closed: "게임이 꺼져서 끝남",
   lost_game: "게임 신호가 끊겨서 끝남", max_steps: "최대 판단 도달", stopped: "중지됨", error: "멈춤",
   goal_reached: "최종 목표 달성으로 끝남" };
-// 최종 목표 줄: 단계가 있는 판(A-6-4)은 "N단계 · 문장"과 이룬 단계. 옛 판은 적은 목표나 기본 목표
+// 최종 목표 줄: 단계가 있는 판(A-6-4~)은 "N단계 · 문장"과 이룬 목표. 옛 판은 적은 목표나 기본 목표
+// 4단계 판(A-6-6, goal_name 있음)은 이룬 목표를 이름으로, A-6-4 판(0~6 단계)은 단계 번호로 보인다
 function goalText(c) {
   if (typeof c.goal_stage_now !== "number") return c.final_goal || '지하 5층 보스 "구(Goo)" 처치';
-  const reached = (c.goals_reached || []).map(g => `${g.stage}단계(판단 ${g.step})`);
+  const reached = (c.goals_reached || []).map(g => `${g.name || g.stage + "단계"}(판단 ${g.step})`);
   return `${c.goal_stage_now}단계 · ${c.final_goal}` + (reached.length ? ` · 달성: ${reached.join(", ")}` : "");
 }
 function light(s) {

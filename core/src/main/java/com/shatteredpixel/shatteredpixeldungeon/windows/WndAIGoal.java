@@ -31,9 +31,11 @@ public class WndAIGoal extends WndOptions {
 
 	private final int id;
 
-	public WndAIGoal( int id, String reached, int step, String next ){
+	//simulated: 개발용 F9 흉내로 이룬 것 (A-6-6)
+	public WndAIGoal( int id, String reached, int step, String next, boolean simulated ){
 		super(Messages.get(WndAIGoal.class, "title"),
-				Messages.get(WndAIGoal.class, "body", reached, step, next),
+				(simulated ? Messages.get(WndAIGoal.class, "simulated") + "\n\n" : "")
+						+ Messages.get(WndAIGoal.class, "body", reached, step, next),
 				Messages.get(WndAIGoal.class, "next"),
 				Messages.get(WndAIGoal.class, "to_title"));
 		this.id = id;

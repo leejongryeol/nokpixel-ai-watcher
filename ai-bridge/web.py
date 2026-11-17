@@ -410,6 +410,20 @@ def bridge_goal_choice():
     return jsonify({"ok": True})
 
 
+@app.post("/api/bridge/simulate_goal")
+@bridge_only
+def bridge_simulate_goal():
+    """⑫ 시험용 달성 흉내 (A-6-6): 게임이 개발용 실행(desktop:debug)에서만 F9로 보낸다. 기록에는 simulated로 남는다."""
+    data = body()
+    a = running_agent(data.get("run_id"))
+    if not a:
+        return jsonify({"ok": False, "reason": "not_running"}), 409
+    result = a.simulate_goal()
+    if not result:
+        return jsonify({"ok": False, "reason": "not_now"}), 409
+    return jsonify(result)
+
+
 @app.post("/api/bridge/ended")
 @bridge_only
 def bridge_ended():

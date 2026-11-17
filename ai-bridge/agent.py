@@ -831,6 +831,9 @@ class Agent:
         # 기다리는 동안 판단·키·클릭·명령을 하지 않는다. {"id", "stage", "name", "step", "depth", "next_name", "asked_at", "discarded_cost_usd"}
         self._goal_wait = None
         self._goal_wait_seq = 0
+        # 시험용 달성 흉내 (A-6-6, 개발용 실행의 F9): 흉내로 이룬 것은 goals_reached·goal_choices에 simulated로 남긴다
+        self._simulating = False  # 지금 판정이 흉내인지 (단계 0~2)
+        self._simulate_won = False  # 다음 ⑥ won이 흉내인지 (엔딩 단계: 게임이 원작 아뮬렛 화면을 연다)
         # 게임 명령 (A-6-5): ⑨로 게임이 가져갈 명령 {"seq", "name", "args"}. 가져가면 비운다
         self._command = None
         self._command_taken_at = 0.0
@@ -1053,15 +1056,19 @@ class Agent:
         if not hit:
             return
         now = datetime.now().isoformat(timespec="seconds")
-        self.config["goals_reached"].append({"stage": stage, "name": name, "goal": goal, "step": self.step,
-                                             "at": now, "depth": depth})
+        reached = {"stage": stage, "name": name, "goal": goal, "step": self.step, "at": now, "depth": depth}
+        simulated = self._simulating or (won and self._simulate_won)
+        if simulated:
+            reached["simulated"] = True
+        self.config["goals_reached"].append(reached)
         self._save_config()
         if won:  # 엔딩: 게임은 이미 원작 엔딩 화면으로 갔다. 판을 끝낸다
             self.end_game("goal_reached", depth)
             return
         self._goal_wait_seq += 1
         self._goal_wait = {"id": self._goal_wait_seq, "stage": stage, "name": name, "step": self.step, "depth": depth,
-                           "next_name": GOAL_STAGES[stage + 1][1], "asked_at": now, "discarded_cost_usd": 0.0}
+                           "next_name": GOAL_STAGES[stage + 1][1], "asked_at": now, "discarded_cost_usd": 0.0,
+                           "simulated": simulated}
         if self.input_lock is not None:  # 사람이 창의 버튼을 누를 수 있게 잠금을 푼다 (개입이 아니라 판 진행 결정)
             self.input_lock.stop()
 
@@ -1075,7 +1082,27 @@ class Agent:
         w = self._goal_wait
         if not w:
             return None
-        return {"id": w["id"], "stage": w["stage"], "reached": w["name"], "step": w["step"], "next": w["next_name"]}
+        return {"id": w["id"], "stage": w["stage"], "reached": w["name"], "step": w["step"], "next": w["next_name"],
+                "simulated": w["simulated"]}
+
+    def simulate_goal(self):
+        """시험용 달성 흉내 (A-6-6). 게임이 개발용 실행에서만 F9로 부른다. 못 하면 None.
+        단계 0~2: 바로 달성으로 판정해 달성 창을 띄우게 한다. 엔딩: 다음 ⑥ won을 흉내로 표시하고 게임이 아뮬렛 화면을 연다."""
+        with self._lock:
+            if (self.config.get("goal_version") != GOAL_VERSION or self.end_reason or self._goal_wait
+                    or self.status != "running"):
+                return None
+            stage = self.config["goal_stage_now"]
+            judge = GOAL_STAGES[stage][2]
+            if judge == "won":
+                self._simulate_won = True
+                return {"ok": True, "stage": stage, "amulet": True}
+            self._simulating = True
+            try:
+                self._judge_goal({"door_passed": True} if judge == "door" else {"bosses_slain": [judge]}, self.depth)
+            finally:
+                self._simulating = False
+            return {"ok": True, "stage": stage, "goal_wait": self.goal_wait_view()}
 
     def goal_choice(self, wait_id, choice):
         """달성 창에서 사람이 고른 것 (A-6-6). next: 다음 단계를 최종 목표로 / title: 판을 끝내고 게임은 타이틀로.
@@ -1087,7 +1114,7 @@ class Agent:
             self.config.setdefault("goal_choices", []).append({
                 "stage": w["stage"], "name": w["name"], "choice": choice, "step": w["step"],
                 "asked_at": w["asked_at"], "chosen_at": datetime.now().isoformat(timespec="seconds"),
-                "discarded_cost_usd": round(w["discarded_cost_usd"], 6)})
+                "discarded_cost_usd": round(w["discarded_cost_usd"], 6), **({"simulated": True} if w["simulated"] else {})})
             self._goal_wait = None
             if choice == "next":  # 다음 판단 맨 앞에 "최종 목표 달성: …. 새 최종 목표: …." (기존 알림 경로)
                 stage = w["stage"] + 1

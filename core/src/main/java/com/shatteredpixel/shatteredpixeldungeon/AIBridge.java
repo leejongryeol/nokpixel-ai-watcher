@@ -22,6 +22,7 @@
 package com.shatteredpixel.shatteredpixeldungeon;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Net;
 import com.badlogic.gdx.utils.JsonReader;
 import com.badlogic.gdx.utils.JsonValue;
@@ -33,6 +34,7 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Goo;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mimic;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
+import com.shatteredpixel.shatteredpixeldungeon.items.Amulet;
 import com.shatteredpixel.shatteredpixeldungeon.items.Heap;
 import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.shatteredpixel.shatteredpixeldungeon.items.potions.Potion;
@@ -54,6 +56,7 @@ import com.shatteredpixel.shatteredpixeldungeon.windows.WndAIGoal;
 import com.watabou.noosa.Game;
 import com.watabou.noosa.Scene;
 import com.watabou.utils.Callback;
+import com.watabou.utils.DeviceCompat;
 import com.watabou.utils.Signal;
 
 import java.io.File;
@@ -136,6 +139,7 @@ public class AIBridge {
 				//add()는 이미 붙어 있으면 아무것도 하지 않으므로, 매 프레임 불러 지워졌으면 다시 붙인다
 				GLog.update.add(logListener);
 				checkDoor();
+				checkSimulateKey();
 				checkWaiting();
 				pollCommand();
 				heartbeat();
@@ -566,6 +570,41 @@ public class AIBridge {
 		});
 	}
 
+	//시험용 달성 흉내 (A-6-6): 개발용 실행(desktop:debug)에서만 F9로 "지금 단계 달성"을 흉내 낸다. 배포용에서는 아무것도 하지 않는다.
+	//Python이 흉내로 표시(simulated)해서 기록한다. 엔딩 단계는 원작 아뮬렛 화면을 열어 실제 승리 흐름을 탄다
+	private static boolean simulateInFlight;
+
+	private static void checkSimulateKey(){
+		if (!DeviceCompat.isDebug() || simulateInFlight || !Gdx.input.isKeyJustPressed(Input.Keys.F9)) return;
+		Hero hero = Dungeon.hero;
+		if (hero == null || !hero.isAlive() || !hero.ready || !(Game.scene() instanceof GameScene)
+				|| GameScene.interfaceBlockingHero()) return;
+		final String runId = activeRunId;
+		JsonValue body = object();
+		body.addChild("run_id", new JsonValue(runId));
+		simulateInFlight = true;
+		post("/api/bridge/simulate_goal", body, SHORT_TIMEOUT, new Listener() {
+			@Override
+			public void onResult(JsonValue result) {
+				simulateInFlight = false;
+				if (result == null || !result.getBoolean("ok", false) || !runId.equals(activeRunId)) return;
+				if (result.getBoolean("amulet", false)) {
+					simulateAmulet();
+				} else {
+					showGoalWindow(result);
+				}
+			}
+		});
+	}
+
+	//아뮬렛을 주운 것처럼: 얻음 표시(⑥ won 판정)를 하고 아뮬렛의 [끝내기] 동작으로 원작 아뮬렛 화면을 연다 (개발용 실행만)
+	private static void simulateAmulet(){
+		Hero hero = Dungeon.hero;
+		if (!DeviceCompat.isDebug() || hero == null || !hero.isAlive() || !(Game.scene() instanceof GameScene)) return;
+		Statistics.amuletObtained = true;
+		new Amulet().execute(hero, "END");
+	}
+
 	//⑦·⑧ 응답에 goal_wait가 있으면 달성 창을 띄운다 (A-6-6). 던전 화면에서만, 같은 번호는 한 번만
 	private static void showGoalWindow( JsonValue result ){
 		JsonValue w = result.get("goal_wait");
@@ -575,7 +614,8 @@ public class AIBridge {
 		goalWindowId = id;
 		//이어하기 슬롯 화면에 "AI 최종 목표 달성! (이름)"을 보이도록 슬롯마다 기록한다 (저장 파일은 그대로)
 		SPDSettings.aiGoalMark(GamesInProgress.curSlot, Dungeon.seed, w.getString("reached", ""));
-		GameScene.show(new WndAIGoal(id, w.getString("reached", ""), w.getInt("step", 0), w.getString("next", "")));
+		GameScene.show(new WndAIGoal(id, w.getString("reached", ""), w.getInt("step", 0), w.getString("next", ""),
+				w.getBoolean("simulated", false)));
 	}
 
 	//달성 창에서 고른 것을 Python에 보낸다 (⑩). Python이 받지 않으면 다음 ⑦ 응답에 창이 다시 뜨게 한다.

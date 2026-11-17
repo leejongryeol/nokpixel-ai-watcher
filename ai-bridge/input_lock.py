@@ -120,6 +120,7 @@ def run_lock(hwnd, parent_pid):
     WHEEL = {0x20A, 0x20E}
     KEY_DOWN, KEY_UP = {0x100, 0x104}, {0x101, 0x105}
     VK_F12 = 0x7B
+    VK_F9 = 0x78  # 시험용 달성 흉내 키 (A-6-6). 개발용 게임만 쓰고 배포용 게임은 무시한다. AI가 누를 수 있는 키 목록에는 없다
 
     blocked_buttons, blocked_keys = set(), set()
     unlocked = [False]  # 비상 해제 요청. 훅 안에서는 tkinter를 부르면 프로그램이 죽어서 표시만 하고, check_unlock()이 끝낸다
@@ -156,6 +157,8 @@ def run_lock(hwnd, parent_pid):
                 if wparam in KEY_DOWN and info.vkCode == VK_F12:
                     unlocked[0] = True  # 이 순간부터 아무것도 막지 않는다
                     return 1
+                if info.vkCode == VK_F9:
+                    return user32.CallNextHookEx(None, code, wparam, lparam)
                 if wparam in KEY_DOWN and user32.GetForegroundWindow() == hwnd.value:
                     blocked_keys.add(info.vkCode)
                     return 1

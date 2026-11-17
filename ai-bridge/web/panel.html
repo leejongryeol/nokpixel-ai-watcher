@@ -229,8 +229,10 @@ function light(s) {
   if (s.paused) return ["yellow", "일시정지 · 사람이 조작할 수 있어요"];
   if (s.phase === "limit") return ["yellow", "한도 도달 · 늘리거나 끝내 주세요"];
   if (s.phase === "goal_wait") return ["yellow", "달성 · 사람의 선택을 기다리는 중"];
+  if (s.capture_waiting === "minimized") return ["yellow", "게임 창이 최소화돼 있어요 · 다시 열면 이어 가요"];
   if (s.phase === "waiting_game") return ["yellow", "게임 신호를 기다리는 중 (층 이동 등)"];
-  if (s.focus_waiting) return ["yellow", "게임 창을 기다리는 중"];
+  if (s.capture_waiting === "black") return ["yellow", "게임 화면을 찍지 못해 기다리는 중"];
+  if (s.focus_waiting) return ["yellow", "게임 창을 기다리는 중 · 게임 창 제목 줄이나 [게임 창 앞으로]를 눌러 주세요"];
   if (s.typing) return ["yellow", "힌트 입력 중이라 기다리는 중"];
   if (s.phase === "thinking" || s.phase === "capture") return ["yellow", "AI가 생각하는 중"];
   if (s.game_front === null) return ["", "데모 · 게임 창 없음"];

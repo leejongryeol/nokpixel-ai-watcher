@@ -58,9 +58,10 @@ MILESTONES = [
 MILESTONE_MAX = sum(points for _, _, points in MILESTONES)
 BASIS_VALUES = ["화면", "기록", "추측"]
 WAIT_AFTER_ACTION = 0.6  # 행동 후 화면이 바뀔 때까지 기다리는 시간(초)
-FOCUS_RETRIES = 3  # 게임 창을 맨 앞으로 가져오기 시도 횟수 (입력 전 확인)
-FOCUS_WAIT_SECONDS = 30  # 그래도 못 가져오면 다시 시도하며 기다리는 최대 시간(초). 넘으면 판을 멈춘다
-FOCUS_WAIT_INTERVAL = 2  # 기다리는 동안 다시 시도하는 간격(초)
+FOCUS_RETRIES = 3  # 게임 창을 맨 앞으로 가져오기 시도 횟수 (판 시작 때 한 번, 사람이 누른 [게임 창 앞으로])
+FOCUS_WAIT_INTERVAL = 0.3  # 키·클릭 판단에서 게임 창이 맨 앞이 되기를 기다리며 다시 보는 간격(초). 시간 제한 없음 (A-6-6)
+CAPTURE_RETRY = 1.0  # 최소화·검은 화면이라 못 찍을 때 다시 찍는 간격(초). 시간 제한 없음 (A-6-6)
+RENDER_FRESH = 1.5  # 찍기 직전 살아 있음 신호가 이 시간(초) 안에 와 있어야 찍는다 (게임이 지금 그리고 있다는 뜻)
 TYPING_WAIT_SECONDS = 60  # 관찰자가 힌트를 입력하는 동안 다음 판단을 미루는 최대 시간(초)
 # 게임에서 시작한 판: 게임이 1초마다 보내는 살아 있음 신호(⑦)를 키마다 확인한다 (bridge.md 9장 A-5-4)
 HEARTBEAT_STALE = 3  # 신호가 이 시간(초)보다 오래되면 키를 보내지 않고 기다린다 (층 이동 로딩 등)
@@ -150,10 +151,12 @@ GAME_DATA_RULES = """[게임 정보 읽는 법]
 - [게임 정보]·[지도]에서 본 것도 basis는 "화면"으로 적는다."""
 GAME_DATA_NONE = "[게임 정보] 이번 판단에는 없음 (화면만 보고 판단)"
 # 게임 명령 (A-6-5, game-state.md 3장): 게임에서 시작한 판에만 규칙 [조작법] 끝에 붙이고 도구에 더한다
-COMMAND_RULES = """- 게임 명령 도구도 쓸 수 있다: move_to(x,y) 그 칸까지 가기, attack(x,y) 그 칸의 적 공격, pick_up(x,y, 비우면 발밑) 줍기·상자 열기, take_stairs(x,y) 계단 타기, rest(turn 한 턴 / full 체력이 찰 때까지) 쉬기, search 주변 탐색
+COMMAND_RULES = """- 이동·공격·줍기·계단·쉬기·탐색은 명령을 쓴다. 키·클릭은 창을 닫거나 명령으로 안 되는 것에만 쓴다
+- 게임 명령 도구도 쓸 수 있다: move_to(x,y) 그 칸까지 가기, attack(x,y) 그 칸의 적 공격, pick_up(x,y, 비우면 발밑) 줍기·상자 열기, take_stairs(x,y) 계단 타기, rest(turn 한 턴 / full 체력이 찰 때까지) 쉬기, search 주변 탐색
 - 명령의 좌표는 [게임 정보]·[지도]의 좌표다. 가 본 적 없는 칸(지도의 빈칸)으로는 못 간다
 - move_to는 도착하거나 새 적이 보이면 멈춘다. 명령 한 번에 여러 턴이 지날 수 있다
 - 명령을 실행하지 못하면 다음 [게임 정보]에 이유가 나온다"""
+RULES_VERSION = 2  # 게임 판 규칙 글 버전. 2: COMMAND_RULES 맨 앞에 "명령을 먼저 쓴다" (A-6-6)
 COMMAND_STATE_WAIT = 30  # 명령을 낸 뒤 새 상태(seq가 더 큼)를 기다리는 최대 시간(초). 긴 이동·쉬기
 COMMAND_SHOT_DELAY = 0.3  # 새 상태를 받은 뒤 화면을 찍기까지 (걷는 그림·숫자가 잦아들게)
 COMMAND_OUTCOMES = {  # 게임이 명령을 실행하지 않은 이유 (game-state.md 3-2)
@@ -533,10 +536,10 @@ class WindowsGame:
         import ctypes
         from ctypes import wintypes
         import pyautogui
-        from PIL import Image, ImageGrab
+        from PIL import Image
 
         self.ctypes, self.wintypes = ctypes, wintypes
-        self.pyautogui, self.Image, self.ImageGrab = pyautogui, Image, ImageGrab
+        self.pyautogui, self.Image = pyautogui, Image
         self.user32 = ctypes.windll.user32
         try:  # 화면 배율(125%, 150% 등)이 있어도 실제 픽셀 좌표를 쓰도록 설정
             ctypes.windll.shcore.SetProcessDpiAwareness(2)
@@ -548,12 +551,17 @@ class WindowsGame:
         self.geometry = (0, 0, 1.0, 1.0)
         self.window_size = None  # 마지막으로 찍은 게임 창 안쪽 크기 (config.json 기록용)
         self.stop_event = None  # 에이전트의 중지 신호 (게임 창을 기다리는 중에도 중지할 수 있게)
-        self.waiting_focus = False  # 게임 창을 맨 앞으로 가져오지 못해 기다리는 중
+        self.waiting_focus = False  # 키·클릭 판단에서 사람이 게임 창을 맨 앞으로 하기를 기다리는 중
+        self.waiting_capture = ""  # 화면을 못 찍어 기다리는 이유: "" / minimized / black
+        self.on_wait = None  # 기다리는 동안 부르는 확인 (게임이 꺼졌는지 등. 에이전트가 넣는다)
         self.guard = None  # 키·클릭 하나마다 먼저 부르는 확인 (판이 끝났으면 StopRequested)
         self.last_input_at = 0.0  # 마지막으로 키·클릭을 실제로 보낸 시각 (이 뒤에 받은 상태가 행동 뒤의 상태)
 
     def is_front(self):
         return self.user32.GetForegroundWindow() == self.hwnd
+
+    def is_minimized(self):
+        return bool(self.user32.IsIconic(self.hwnd))
 
     def exists(self):
         return bool(self.user32.IsWindow(self.hwnd))
@@ -589,23 +597,22 @@ class WindowsGame:
 
     def _require_focus(self):
         """입력 직전 확인: 게임 창이 맨 앞이 아니면 아무것도 누르지 않는다 (다른 창에 키가 들어가는 것을 막음).
-        못 가져오면 다시 시도하며 최대 FOCUS_WAIT_SECONDS 기다리고, 그래도 안 되면 멈춘다."""
-        if self.focus():
+        A-6-6: 다른 프로그램을 쓰는 사람의 입력을 끊지 않도록 게임 창을 앞으로 가져오지 않는다.
+        사람이 게임 창(제목 줄·작업 표시줄·패널의 [게임 창 앞으로])을 누를 때까지 기다린다. 시간 제한 없음.
+        기다리는 동안에도 중지·일시정지·달성 창·게임 꺼짐은 guard로 바로 반영한다."""
+        if self.is_front():
             return
         self.waiting_focus = True
         try:
-            deadline = time.time() + FOCUS_WAIT_SECONDS
-            while time.time() < deadline:
+            while not self.is_front():
+                if self.guard:
+                    self.guard()
                 if self.stop_event is not None and self.stop_event.wait(FOCUS_WAIT_INTERVAL):
                     raise StopRequested()
                 if self.stop_event is None:
                     time.sleep(FOCUS_WAIT_INTERVAL)
-                if self.focus():
-                    return
         finally:
             self.waiting_focus = False
-        raise RuntimeError(f"게임 창을 {FOCUS_WAIT_SECONDS}초 동안 맨 앞으로 가져오지 못해서 입력을 멈췄어요. "
-                           "다른 창에 키가 들어가는 것을 막기 위해서예요.")
 
     def _print_window(self, width, height):
         """가려져 있어도 게임 창 내용을 직접 받아온다. 실패하거나 완전히 검은 화면이면 None."""
@@ -636,15 +643,34 @@ class WindowsGame:
             gdi.DeleteDC(mem)
             u.ReleaseDC(self.hwnd, hdc)
 
-    def capture(self):
-        """게임 화면을 찍어 AI용 크기로 맞춘다."""
-        focused = self.focus()  # 실패해도 괜찮다. PrintWindow는 가려진 창도 찍는다
-        box = self._client_box()
-        image = self._print_window(box[2] - box[0], box[3] - box[1])
-        if image is None:  # 안 되면 화면에서 그대로 찍는다. 게임이 맨 앞이 아니면 다른 창이 찍히므로 멈춘다
-            if not focused:
-                raise RuntimeError("게임 창을 찍지 못했어요. 게임 창이 최소화돼 있거나 다른 창에 가려져 있어요.")
-            image = self.ImageGrab.grab(bbox=box, all_screens=True).convert("RGB")
+    def capture(self, wait=True):
+        """게임 화면을 찍어 AI용 크기로 맞춘다. wait=False면 못 찍을 때 기다리지 않고 바로 오류 (판 끝 마지막 화면).
+        A-6-6: 창 내부 캡처(PrintWindow)만 쓰고 게임 창을 앞으로 가져오지 않는다 (가려져 있어도 찍힘, 11/17 확인).
+        최소화돼 있으면 게임이 그리기를 멈춰 지난 화면이 되므로 찍지 않고, 사람이 다시 열 때까지 기다린다.
+        검은 화면·실패도 다시 찍으며 기다린다."""
+        while True:
+            image = None
+            if not self.user32.IsIconic(self.hwnd):
+                box = self._client_box()
+                if box[2] > box[0] and box[3] > box[1]:
+                    image = self._print_window(box[2] - box[0], box[3] - box[1])
+                self.waiting_capture = "" if image is not None else "black"
+            else:
+                self.waiting_capture = "minimized"
+            if image is not None:
+                break
+            if not wait or not self.exists():
+                self.waiting_capture = ""
+                raise RuntimeError("게임 창이 꺼졌거나 최소화돼 있어서 화면을 찍지 못했어요.")
+            if self.stop_event is not None and self.stop_event.is_set():
+                self.waiting_capture = ""
+                raise StopRequested()
+            if self.on_wait:
+                self.on_wait()
+            if self.stop_event is not None:
+                self.stop_event.wait(CAPTURE_RETRY)
+            else:
+                time.sleep(CAPTURE_RETRY)
         self.geometry = (box[0], box[1], image.width / AI_IMAGE_SIZE[0], image.height / AI_IMAGE_SIZE[1])
         self.window_size = image.size
         if image.size != AI_IMAGE_SIZE:  # 칸 평균으로 줄인다 (픽셀 그림이 덜 뭉개짐)
@@ -720,7 +746,7 @@ class DemoGame:
         self.pressed = 0  # 시험용: 실제로 "누른" 키 수
         self.last_input_at = 0.0
 
-    def capture(self):
+    def capture(self, wait=True):
         width, height = AI_IMAGE_SIZE
         image = self.Image.new("RGB", AI_IMAGE_SIZE, (22, 20, 15))
         draw = self.ImageDraw.Draw(image)
@@ -784,6 +810,8 @@ class Agent:
         self.config["ai_input"] = "screen_data" if game_run else "screen"
         if game_run:  # 게임 데이터 글 버전 (이 칸이 없는 screen_data 기록은 1)
             self.config["game_data_version"] = GAME_DATA_VERSION
+        if game_run:  # 규칙 글 버전 (A-6-6: [조작법]에 "명령을 먼저 쓴다" 한 줄). 이 칸이 없는 게임 판은 1
+            self.config["rules_version"] = RULES_VERSION
         # 준 도구 묶음 (A-6-5). 게임에서 시작한 판은 키·클릭 + 게임 명령 6개. 이 칸이 없는 옛 기록은 keys_click
         self.config["tool_set"] = "keys_click_commands" if game_run else "keys_click"
         if self.config["guide"]:  # 어떤 공략 문서로 돌린 판인지
@@ -812,6 +840,8 @@ class Agent:
         # 게임에서 시작한 판의 게임 상태 (⑥ 판 끝, ⑦ 살아 있음 신호)
         self._watch_game = self.config.get("started_from") == "game"
         self._heartbeat_at = 0.0
+        self._run_started_at = 0.0  # 실행을 시작한 시각 (첫 살아 있음 신호가 오기 전의 기준, A-6-6)
+        self._minimized_at = 0.0  # 게임 창이 최소화돼 있던 마지막 시각 (다시 연 직후 신호가 오기 전에 판을 끝내지 않게)
         self._hero_alive = True
         self.depth = None
         self.end_reason = ""
@@ -939,6 +969,11 @@ class Agent:
             if hasattr(game, "exists") and not game.exists():
                 self.end_game("game_closed")
                 raise StopRequested()
+            if self._game_minimized(game):  # 최소화: 게임이 그리기·신호를 멈춘다. 사람이 다시 열 때까지 기다린다 (A-6-6)
+                deadline = None
+                self.phase = "waiting_game"
+                self._stop.wait(0.3)
+                continue
             deadline = deadline or time.time() + HEARTBEAT_WAIT
             if time.time() > deadline:
                 self.end_game("lost_game")
@@ -971,6 +1006,7 @@ class Agent:
             "typing": time.time() < self._typing_until,
             "game_front": game.is_front() if hasattr(game, "is_front") else None,
             "focus_waiting": bool(getattr(game, "waiting_focus", False)),
+            "capture_waiting": getattr(game, "waiting_capture", ""),  # 화면을 못 찍어 기다리는 이유 (A-6-6)
             "lock_used": self.input_lock is not None,
             "locked": bool(self.input_lock and self.input_lock.locking),
             "lock_note": self.input_lock.note if self.input_lock else "",
@@ -1152,8 +1188,7 @@ class Agent:
         with self._lock:
             self._command = {"seq": seq, "name": action["tool"], "args": args}
             self._command_taken_at = 0.0
-        if hasattr(game, "focus"):  # 사람이 키를 누르지 않게 게임 창을 앞으로 (입력 잠금은 그대로)
-            game.focus()
+        # 명령 판단은 게임 창을 앞으로 가져오지 않고 키보드·마우스도 건드리지 않는다 (A-6-6, 다른 프로그램 입력을 끊지 않게)
         start, outcome = time.time(), None
         try:
             while True:
@@ -1293,14 +1328,18 @@ class Agent:
             with open(os.path.join(self.run_dir, INHERITED_FILE), "w", encoding="utf-8") as f:
                 f.write(self.inherited_lessons + "\n")
         self.status = "running"
+        self._run_started_at = time.time()
         final_status, client, image, game = "finished", None, None, None
         try:
             game = DemoGame() if self.config["demo"] else WindowsGame()
             game.stop_event = self._stop
             game.guard = self._guard
+            game.on_wait = lambda: self._check_game_waiting(game)  # 화면을 못 찍어 기다리는 동안 (A-6-6)
             self.game = game
-            if self.config.get("started_from") == "game" and hasattr(game, "focus"):
-                game.focus()  # 게임에서 시작한 판: 던전 도착 뒤 게임 창을 맨 앞으로 (실패해도 키를 보내기 전에 다시 확인한다)
+            if hasattr(game, "focus"):
+                # 판 시작 때 한 번만 게임 창을 맨 앞으로 (게임 판은 던전 도착 뒤, mvp 판은 시작할 때).
+                # 그 뒤로는 앞으로 가져오지 않는다 (A-6-6). 실패해도 키를 보내기 전에 맨 앞인지 다시 확인한다
+                game.focus()
             if self.input_lock is not None:  # 실패해도 판은 진행한다 (관찰 화면에 🔓와 이유가 보임)
                 self.input_lock.start(game.hwnd)
             if not self.config["demo"]:
@@ -1331,6 +1370,11 @@ class Agent:
                     game_data["goal_notice"], game_data["goal_notice_from"] = self.take_goal_notice()
                     if self.config.get("final_goal") != system_goal:
                         system, system_goal = self.system_prompt(), self.config.get("final_goal")
+                self._wait_render_fresh(game)  # 게임이 지금 그리고 있을 때 찍는다 (A-6-6)
+                if self._stop.is_set():
+                    final_status = "stopped"
+                    break
+                self.phase = "capture"
                 image = game.capture()
                 if step == 1:  # 실제로 찍은 게임 창 크기를 기록에 남긴다
                     self._record_display(game)
@@ -1460,11 +1504,40 @@ class Agent:
             return
         if not self._hero_alive:
             self.end_game("died")
-        elif time.time() - self._heartbeat_at > HEARTBEAT_STALE + HEARTBEAT_WAIT:
-            self.end_game("game_closed" if hasattr(game, "exists") and not game.exists() else "lost_game")
+        elif time.time() - max(self._heartbeat_at, self._run_started_at, self._minimized_at) > HEARTBEAT_STALE + HEARTBEAT_WAIT:
+            if hasattr(game, "exists") and not game.exists():
+                self.end_game("game_closed")
+            elif not self._game_minimized(game):  # 최소화로 신호가 멈춘 것은 판 끝으로 보지 않는다 (A-6-6)
+                self.end_game("lost_game")
+
+    def _game_minimized(self, game):
+        """게임 창이 최소화돼 있는지 (데모는 False). 관찰 패널에 이유를 보이도록 표시도 한다."""
+        minimized = bool(hasattr(game, "is_minimized") and game.is_minimized())
+        if minimized:
+            self._minimized_at = time.time()
+        if hasattr(game, "waiting_capture"):
+            if minimized:
+                game.waiting_capture = "minimized"
+            elif game.waiting_capture == "minimized":
+                game.waiting_capture = ""
+        return minimized
+
+    def _wait_render_fresh(self, game):
+        """찍기 직전 확인 (A-6-6): 게임이 지금 그리고 있는지. ⑦ 살아 있음 신호는 던전 화면이 그려질 때만 오므로,
+        마지막 행동 뒤에 온 신호가 RENDER_FRESH초 안에 있으면 PrintWindow가 행동 뒤의 화면을 찍는다. 아니면 기다린다.
+        게임에서 시작한 판이 아니면 바로 돌아간다."""
+        if not self._watch_game:
+            return
+        while not self._stop.is_set():
+            beat_at = self._heartbeat_at
+            if time.time() - beat_at <= RENDER_FRESH and beat_at > self._input_done_at:
+                return
+            self.phase = "waiting_game"
+            self._check_game_waiting(game)
+            self._stop.wait(0.2)
 
     def _wait_while_paused(self, game):
-        """일시정지 동안 기다린다. 재개하면 게임 창을 앞으로 가져오고 입력 잠금을 다시 건다.
+        """일시정지 동안 기다린다. 재개하면 입력 잠금을 다시 건다 (게임 창은 앞으로 가져오지 않음, A-6-6).
         멈춘 시간은 config.json의 pauses에 남긴다 (그동안 사람이 조작했을 수 있으므로)."""
         if not self._paused.is_set():
             return
@@ -1480,14 +1553,12 @@ class Agent:
             self._save_config()
         if self._stop.is_set():
             return
-        if hasattr(game, "focus"):
-            game.focus()
-        if self.input_lock is not None:
+        if self.input_lock is not None:  # 게임 창은 앞으로 가져오지 않는다 (A-6-6). 키 판단이면 사람이 누를 때까지 기다린다
             self.input_lock.start(game.hwnd)
 
     def _wait_for_goal_choice(self, game):
         """달성 창 (A-6-6): 사람이 고를 때까지 판단하지 않고 기다린다 (비용 없음). 게임이 살아 있는지는 계속 본다.
-        [다음 목표로]면 게임 창을 앞으로 가져오고 입력 잠금을 다시 건다. [타이틀로]면 판이 끝나 있다."""
+        [다음 목표로]면 입력 잠금을 다시 건다 (게임 창은 앞으로 가져오지 않음). [타이틀로]면 판이 끝나 있다."""
         if not self._goal_wait:
             return
         while self._goal_wait and not self._stop.is_set():
@@ -1496,8 +1567,6 @@ class Agent:
             self._stop.wait(0.3)
         if self._stop.is_set():
             return
-        if hasattr(game, "focus"):
-            game.focus()
         if self.input_lock is not None:
             self.input_lock.start(game.hwnd)
 
@@ -1527,7 +1596,7 @@ class Agent:
     def _capture_final(self, game):
         """마지막 행동의 결과가 보이도록, 판이 끝난 뒤 화면을 한 번 더 찍는다. 실패하면 None."""
         try:
-            image = game.capture()
+            image = game.capture(wait=False)  # 최소화 등으로 못 찍으면 기다리지 않는다
             image.save(os.path.join(self.run_dir, FINAL_IMAGE))
             return image
         except Exception:

@@ -10,7 +10,7 @@
 OpenAI VPT 논문(2022)은 다이아몬드 곡괭이까지 가는 길을 단계로 쪼개고, 뒤 단계일수록 점수를 높게 줬다
 (나무·돌 1점 → 석탄 2점 → 철 4점 → 다이아 8점, 많이 모으는 아이템은 개수로 나눔. 논문 부록 G.1, 표 7).
 이 프로젝트는 AI를 **학습시키지 않으므로** 이 점수를 보상이 아니라 **평가 지표**로만 쓴다.
-AI에게는 점수를 알려주지 않는다. AI가 받는 목표는 여전히 "5층 보스 처치" 하나다.
+AI에게는 점수를 알려주지 않는다. AI가 받는 목표는 AI 설정에서 고른 최종 목표 하나다.
 
 ## 이정표 표
 
@@ -50,8 +50,8 @@ AI에게는 점수를 알려주지 않는다. AI가 받는 목표는 여전히 "
 | 구 체력 절반 이하 | 본 적 있는 구의 `HP/HT` ≤ 0.5 | |
 | 구 처치 | 본 적 있는 구가 죽었거나 층에서 사라짐 | ✅ `Goo.die()` → `GameScene.bossSlain()` |
 
-### 최종 목표 달성 기록 (A-6-4)
-이정표와 따로, AI 설정에서 고른 최종 목표 단계(0 문 통과 ~ 6 엔딩)를 이룬 것은 `config.json`의 `goals_reached`에 `{stage, goal, step, at, depth}`로 남는다. 판정은 같은 ⑧ `record`의 `door_passed`·`bosses_slain`과 ⑥ `won`. 이정표 점수에는 더하지 않는다. 끝내기로 끝난 판의 `ended_reason`은 `goal_reached` ([bridge.md](bridge.md) 9장).
+### 최종 목표 달성 기록 (A-6-4, A-6-6)
+이정표와 따로, AI 설정에서 고른 최종 목표 단계를 이룬 것은 `config.json`의 `goals_reached`에 `{stage, name, goal, step, at, depth}`로 남는다 (F9 흉내는 `simulated: true`). 11/17부터 단계는 0 문 통과 · 1 5층 보스 구 · 2 최종 보스(25층) · 3 엔딩 네 개다 (`goal_version: 2`. 그전 판은 0~6이라 번호 뜻이 다르다). 판정은 같은 ⑧ `record`의 `door_passed`·`bosses_slain`과 ⑥ `won`. 이정표 점수에는 더하지 않는다. 달성 창에서 [타이틀로]를 고른 판과 엔딩을 이룬 판의 `ended_reason`은 `goal_reached`, 사람이 고른 것은 `goal_choices` ([bridge.md](bridge.md) 9장).
 
 ## 함께 관찰할 것: "속이는 목표"
 

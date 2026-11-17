@@ -155,13 +155,13 @@ flowchart TD
   "steps": 50, "lessons_from": "",
   "hero_class": "WARRIOR", "hero_title": "전사",
   "challenges": 0, "challenge_names": [], "challenge_titles": [], "custom_seed": "",
-  "goal_stage": 1, "on_goal": "end"
+  "goal_stage": 1
 }
 응답 {"ok": true, "run_id": "run_20261102_140501_player"}
 ```
 Python은 `Agent`를 만들어 두기만 하고 **아직 시작하지 않는다** (대기 판). `config.json`도 이때 쓴다 (A-5-3). ⑤가 오면 시작한다 (A-5-4).
 `hero_title`·`challenge_titles`는 게임 화면에 보이는 언어 그대로의 이름이다 (A-5-4). AI 입력의 `[이번 판]`에 쓴다 (7장).
-`goal_stage`(0~6, 그 밖은 1)·`on_goal`(`end`/`next`, 그 밖은 `end`)은 최종 목표 단계와 달성 뒤 처리다 (A-6-4, 9장 "A-6-4 결과"). 11/14 전 게임이 보내던 `final_goal`(자유 글)은 없앴다.
+`goal_stage`(0~3, 그 밖은 1)는 최종 목표 단계다 (A-6-6, 9장 "A-6-6 결과"). 11/17 전의 `on_goal`(달성 뒤 처리)은 없애고, 사람이 게임 안 달성 창에서 고른다(⑩). 11/14 전 게임이 보내던 `final_goal`(자유 글)은 없앴다.
 
 **⑤ 던전 도착** `POST /api/bridge/arrived` (게임 → Python, [AI로 시작]한 판의 첫 `GameScene`에서 한 번만)
 ```json
@@ -181,22 +181,24 @@ Python은 `Agent`를 만들어 두기만 하고 **아직 시작하지 않는다*
 | `reason` | 지점 | 근거 |
 |---|---|---|
 | `died` | `GameScene.gameOver()` | `Hero.die()` → `reallyDie()` → 렌더 스레드에서 `gameOver()`. 앙크가 있으면 부르지 않는다 (부활 창) |
-| `won` | `GameScene.destroy()`에서 `Statistics.gameWon`이 참 | `Dungeon.win()`이 `gameWon`을 켠 뒤 장면을 바꾼다 |
+| `won` | `GameScene.destroy()`에서 `Statistics.gameWon` 또는 `Statistics.amuletObtained`가 참 | `Dungeon.win()`이 `gameWon`을 켠 뒤 장면을 바꾼다. 아뮬렛을 주우면 `Dungeon.win()` 전에 `AmuletScene`으로 가므로 `amuletObtained`도 본다 (A-6-6에서 고침. 그전에는 `quit`으로 갔다) |
 | `quit` | `GameScene.destroy()`에서 `InterlevelScene.mode == NONE` | 층을 옮길 때는 늘 `NONE`이 아닌 값으로 정한 뒤 장면을 바꾼다. 타이틀로 나가기·게임 창 닫기는 `NONE` |
 
 - 게임 창을 닫을 때도 `quit`이 간다. 하지만 곧바로 프로그램이 끝나서 닿을지 보장이 없다. Python은 1초 뒤 게임 창이 없으면 `game_closed`로 바꿔 적는다. 닿지 않으면 ⑦이 끊겨서 멈춘다.
 - `reason`이 위 셋이 아니면 `bad_reason`(400), `run_id`가 진행 중 판과 다르면 `not_running`(409).
-- 한계: 아뮬렛 장면(26층)으로 갈 때도 `quit`으로 보일 수 있다. 목표가 5층이라 다루지 않았다.
+- ~~한계: 아뮬렛 장면(26층)으로 갈 때도 `quit`으로 보일 수 있다~~ → A-6-6에서 고쳤다 (위 표).
+- 응답 `{"ok": true, "credits": true|false}` (A-6-6): `credits`는 `won`이고 그 판의 지금 최종 목표가 엔딩일 때 참이다. 게임은 이 값을 기억했다가 원작 승리 흐름(`AmuletScene`) 뒤에 크레딧 장면을 보인다.
 
 **⑦ 살아 있음 신호** `POST /api/bridge/heartbeat` (게임 → Python, AI 판 동안 1초마다, A-5-4)
 ```json
 요청 {"run_id": "run_20261102_140501_player", "alive": true, "depth": 2, "state_seq": 12, "waiting": true}
-응답 {"ok": true}
+응답 {"ok": true, "goal_wait": null}
 ```
 - `state_seq`·`waiting` (A-6-3, 11/14): 게임이 마지막으로 보낸 ⑧ 상태 번호와, 주인공이 그 상태를 보낸 입력 대기 그대로인지. 벽에 부딪히기·창 열기처럼 턴이 안 지나는 입력 뒤에는 새 ⑧이 없으므로, Python은 이 값으로 마지막 상태가 아직 맞는지 안다 ([game-state.md](game-state.md) 10장). 두 값이 없는 옛 게임이면 Python은 마지막 상태를 쓰지 않는다.
+- `goal_wait` (A-6-6): 달성 창을 띄워야 하면 `{"id", "stage", "reached", "step", "next", "simulated"}`, 아니면 `null`. 게임은 던전 화면에서 같은 `id`의 창(`WndAIGoal`)을 한 번만 띄운다. ⑧ 응답에도 같은 값이 온다.
 - ⑤가 성공한 뒤부터 `GameScene`에 있는 동안 보낸다. 주인공이 죽은 것을 처음 보면 1초를 기다리지 않고 바로 `alive: false`를 보낸다.
-- 응답이 `ok: false`(판이 이미 끝남, 관찰기를 다시 켬)면 게임은 신호를 멈춘다. 이때 `goto_title: true`가 함께 오면(최종 목표를 이뤄 끝내기로 끝난 판, A-6-4) 게임 메뉴 [타이틀로]와 같은 처리(`Dungeon.saveAll()` + `TitleScene`)로 타이틀에 간다. 판 표시를 먼저 지우므로 ⑥ `quit`은 가지 않는다. Python은 마지막 화면(`final.png`)을 찍는 동안 `ok: true`로 신호를 붙잡아 두고, 찍은 뒤 한 번만 `goto_title`을 보낸다. 3번 연달아 실패하면(관찰기가 꺼짐) 신호를 멈추고 기록창에 한 줄 띄운다. 게임은 그대로 진행한다.
-- Python은 키·클릭 하나를 보내기 **직전마다** 확인한다 (`Agent._guard()`): 중지됐으면 멈춤 → 마지막 신호가 `alive: false`면 `died` → 신호가 3초 넘게 없으면 키를 보내지 않고 기다림(층 이동 로딩일 수 있음) → 게임 창이 없어졌으면 `game_closed` → 30초가 지나면 `lost_game`. 게임 창이 맨 앞일 때만 키를 보내는 기존 확인은 그대로다.
+- 응답이 `ok: false`(판이 이미 끝남, 관찰기를 다시 켬)면 게임은 신호를 멈춘다. 이때 `goto_title: true`가 함께 오면(달성 창에서 [타이틀로]를 고른 판, A-6-6) 게임 메뉴 [타이틀로]와 같은 처리(`Dungeon.saveAll()` + `TitleScene`)로 타이틀에 간다. 판 표시를 먼저 지우므로 ⑥ `quit`은 가지 않는다. Python은 마지막 화면(`final.png`)을 찍는 동안 `ok: true`로 신호를 붙잡아 두고, 찍은 뒤 한 번만 `goto_title`을 보낸다. 3번 연달아 실패하면(관찰기가 꺼짐) 신호를 멈추고 기록창에 한 줄 띄운다. 게임은 그대로 진행한다.
+- Python은 키·클릭 하나를 보내기 **직전마다** 확인한다 (`Agent._guard()`): 중지됐으면 멈춤 → 마지막 신호가 `alive: false`면 `died` → 신호가 3초 넘게 없으면 키를 보내지 않고 기다림(층 이동 로딩일 수 있음) → 게임 창이 없어졌으면 `game_closed` → 30초가 지나면 `lost_game`. 게임 창이 맨 앞일 때만 키를 보내는 기존 확인은 그대로다 (A-6-6부터는 앞으로 가져오지 않고 사람이 누를 때까지 기다린다). 게임 창이 최소화돼 있으면 게임이 그리기·신호를 멈추므로, 신호가 끊겨도 `lost_game`으로 끝내지 않고 기다린다 (A-6-6).
 - 키를 보내지 않고 기다리는 동안(일시정지, 한도 도달)에도 확인한다 (A-5-5, `Agent._check_game_waiting()`): `alive: false`면 `died`, 신호가 33초 넘게 없으면 게임 창이 없을 때 `game_closed`, 있을 때 `lost_game`.
 
 **⑧ 상태 보내기** `POST /api/bridge/state` (게임 → Python, A-6-2. 자세한 것: [game-state.md](game-state.md))
@@ -204,7 +206,7 @@ Python은 `Agent`를 만들어 두기만 하고 **아직 시작하지 않는다*
 요청 {"state_version": 1, "run_id": "run_…", "seq": 12, "reasons": ["interrupted_enemy"], "last_command": null,
       "ai": {"hero": {…}, "map": {…}, "mobs": […], "heaps": […], "transitions": […], "traps": […], "plants": […], "bag": {…}, "log": […]},
       "record": {"enemies_slain": 0, "deepest_floor": 1, …}}
-응답 {"ok": true, "want_command": true}
+응답 {"ok": true, "want_command": true, "goal_wait": null}
 ```
 - 보내는 때: AI 판 동안 주인공이 입력을 기다리게 될 때마다 한 번 (층 도착 직후 포함). 실패하면 버리고 다음 대기 때 새 상태를 보낸다.
 - Python은 `logs/<판>/states/<seq>.json`에 저장하고 이정표를 판정한다. A-6-3(11/14)부터 `ai` 칸을 다음 판단의 AI 입력 [게임 정보]·[지도] 글로도 쓴다. `record`는 이정표와 최종 목표 달성 판정(A-6-4의 `door_passed`·`bosses_slain`)에만 쓰고 AI 입력에는 넣지 않는다.
@@ -217,7 +219,31 @@ Python은 `Agent`를 만들어 두기만 하고 **아직 시작하지 않는다*
 요청 {"run_id": "run_…", "seq": 12}
 응답 {"command": null}  또는  {"command": {"seq": 12, "name": "move_to", "args": {"x": 20, "y": 9}}}
 ```
-- 주인공이 입력을 기다리는 동안 0.5초마다, 앞 요청이 돌아온 뒤에만. Python은 넘긴 명령을 지우고, 일시정지·중지·한도 도달·판 끝 중에는 `null`. 진행 중 판이 아니면 409.
+- 주인공이 입력을 기다리는 동안 0.5초마다, 앞 요청이 돌아온 뒤에만. Python은 넘긴 명령을 지우고, 일시정지·중지·한도 도달·판 끝·달성 창(A-6-6) 중에는 `null`. 진행 중 판이 아니면 409.
+
+**⑩ 달성 창 선택** `POST /api/bridge/goal_choice` (게임 → Python, A-6-6)
+```json
+요청 {"run_id": "run_…", "id": 1, "choice": "next"}   // 또는 "title"
+응답 {"ok": true}
+```
+- `id`가 지금 기다리는 창과 다르거나 `choice`가 둘 중 하나가 아니면 `bad_choice`(400), 진행 중 판이 아니면 409. 실패하면 게임은 창을 다시 띄운다.
+- `next`: 단계를 올리고 다음 판단에 알림을 한 번 주고 잠금을 다시 건다. `title`: `ended_reason: goal_reached`로 끝내고 교훈을 쓴 뒤 ⑦ `goto_title`로 게임을 타이틀로 보낸다.
+- `config.json`의 `goal_choices`에 `{stage, name, choice, step, asked_at, chosen_at, discarded_cost_usd, simulated}`로 남는다. 개입으로 세지 않는다.
+
+**⑪ 크레딧 기록** `GET /api/bridge/credits?run_id=…` (게임 → Python, A-6-6, `X-Nokpixel-Bridge` 헤더 필요)
+```json
+응답 {"ok": true, "model_name": "GPT-6 Luna", "steps": 120, "cost_usd": 0.12, "hints": 0, "pauses": 0, "seconds": 3600,
+      "points": 30, "points_max": 51, "goals": [{"name": "5층 보스 구", "step": 80, "simulated": false}]}
+```
+- 진행 중 판이면 지금 기록으로, 끝난 판이면 `logs/`의 기록으로 만든다. 없는 판은 404. 비용은 판단 기록의 `cost_usd` 합(리포트와 같은 규칙), `pauses`는 일시정지 + F12 비상 해제 수. 실패하면 크레딧은 판 기록 없이 원작·프로젝트만 보인다.
+
+**⑫ 달성 흉내** `POST /api/bridge/simulate_goal` (게임 → Python, A-6-6, 개발용 실행에서 F9)
+```json
+요청 {"run_id": "run_…"}
+응답 {"ok": true, "stage": 1, "goal_wait": {…}}   또는   {"ok": true, "stage": 3, "amulet": true}
+```
+- 게임은 `DeviceCompat.isDebug()`이고 주인공이 입력을 기다리며 창이 없을 때만 보낸다. 0~2단계는 바로 달성으로 판정한다. 엔딩은 다음 ⑥ `won`을 흉내로 표시하고, 게임이 아뮬렛을 얻은 것처럼(`Statistics.amuletObtained` + `Amulet` END) 승리 흐름을 연다.
+- 기록에는 `simulated: true`로 남는다. 달성 창이 떠 있거나 판이 끝났으면 `not_now`(409).
 
 **관찰 패널 → Python** (A-5-5, 게임 판에서만. 둘 다 `X-Nokpixel-Bridge` 헤더 필요)
 | 주소 | 요청 | 응답 |
@@ -237,6 +263,9 @@ Python은 `Agent`를 만들어 두기만 하고 **아직 시작하지 않는다*
 | 판 끝 (사망·승리·타이틀로 나가기·창 닫기) | 게임 → Python | ⑥ 판 끝 | 무시. 닿지 않아도 ⑦이 끊겨서 Python은 키를 보내지 않는다 |
 | AI 판 동안 1초마다 | 게임 → Python | ⑦ 살아 있음 신호 | 3번 연달아 실패하면 신호를 멈추고 기록창에 "AI 관찰기와 연결이 끊겼어요. 직접 이어서 할 수 있어요." 한 줄 |
 | 주인공이 입력을 기다리게 될 때마다 (AI 판) | 게임 → Python | ⑧ 상태 보내기 (A-6-2) | 버린다. 다음 대기 때 새 상태. 게임은 그대로 |
+| 달성 창에서 고를 때 (A-6-6) | 게임 → Python | ⑩ 달성 창 선택 | 창을 다시 띄운다 |
+| 크레딧 장면을 열 때 (A-6-6) | 게임 → Python | ⑪ 크레딧 기록 | 판 기록 없이 원작·프로젝트 크레딧만 |
+| 개발용 실행에서 F9 (A-6-6) | 게임 → Python | ⑫ 달성 흉내 | 무시 |
 
 Python이 게임에 먼저 말을 거는 일은 없다. 게임이 물으면 Python이 답한다.
 
@@ -521,7 +550,26 @@ AI 입력(규칙·도구 설명·큰 점검·교훈 쓰기 요청)과 `log.jsonl
 
 - **비교 주의**: 1단계 문장 "지하 5층의 보스 구를 처치하는 것"은 11/14 전 기본 목표 "지하 5층의 보스를 처치하는 것"과 한 단어 다르다 (사용자 결정). `config.json`에 `goal_stage`가 있으면 A-6-4 뒤 판이다. `mvp.py` 판은 단계가 없고 AI 입력이 그대로다 ✅.
 - 확인: ✅ `desktop:compileJava`, `py_compile`, 숨김 검사 / ✅ 데모: 다음 목표로(0→1→2, 알림 각 한 번), 끝내기(⑦ 응답 `ok:true` → `goto_title` 한 번), 1단계에서 10층 보스만은 달성 아님·5층 더하면 1·2단계 함께, 6단계 + ⑥ `won` / ✅ 실제 판(GPT-6 Luna, 목표 0, 끝내기): 문 칸에 들어선 상태에서 `goal_reached`, `final.png`·교훈, 게임이 스스로 타이틀로 감(사용자 확인)
-- ⬜ 실제 판의 "다음 목표로", 실제 보스 처치 판정 (데모로만 확인)
+- ⬜ 실제 판의 "다음 목표로", 실제 보스 처치 판정 (데모로만 확인) → "다음 목표로"는 ✅ 11/15 실제 판, 보스 처치는 아직 ⬜
+
+### A-6-6 결과 (11/17) · 최종 목표 4단계 · 달성 창 · 엔딩 크레딧 · 게임 창을 앞으로 가져오지 않기
+
+| 무엇 | 내용 |
+|---|---|
+| 단계 | 0 문 통과(시험용) · 1 5층 보스 구 · 2 최종 보스 요그제바(25층) · 3 엔딩 (기본 1). [달성하면] 버튼은 없앴다. 설정 키를 `ai_goal_stage_v2`로 바꿔 예전 0~6 값은 이어받지 않는다 (모두 기본 1부터). `config.json`에 `goal_version: 2`, `goal_name` |
+| 달성 창 | 0·1·2를 이루면 ⑦·⑧ 응답의 `goal_wait`로 게임이 던전 위에 `WndAIGoal`을 띄운다 (새 장면 아님). 떠 있는 동안 Python은 판단과 ⑨ 명령을 멈추고(그때 생각하던 판단은 버리고 비용만 더함), 입력 잠금을 풀고, 일시정지를 받지 않는다. 패널 🟡 "달성 · 사람의 선택을 기다리는 중". 뒤로 가기로는 닫히지 않는다 |
+| 고른 뒤 | ⑩. [다음 목표로] → 다음 단계 + 알림 한 번 + 다시 잠금. [타이틀로] → `goal_reached`, 교훈, 저장 후 타이틀. 고른 것과 시각은 `goal_choices`에 남고 개입으로 세지 않는다 |
+| 슬롯 표시 | 목표를 이룬 판의 이어하기 슬롯에 "AI 최종 목표 달성!" (`StartScene` 한 줄, 목표 이름은 넣지 않음, 사용자 결정). `SPDSettings`에 슬롯별 "시드\|목표 이름"을 두고, 슬롯이 비었거나 시드가 다르면(덮어씀·지움) 지운다. 저장 파일 형식은 그대로 |
+| 엔딩 크레딧 | 3을 이루면 ⑥ `won` 응답 `credits: true` → `AmuletScene`의 두 `RankingsScene` 이동 자리에서 `AIBridge.afterVictory()`가 `AICreditsScene`을 고른다. 원작 크레딧(Evan Debenham, Watabou, GPL-3.0), 프로젝트 이름·저장소 주소, ⑪ 판 기록(모델, 판단, 비용, 개입, 시간, 이정표 점수, 이룬 목표와 판단 번호)이 위로 흐르고, [타이틀로]·ESC로 타이틀 |
+| 고친 버그 | 아뮬렛을 주우면 `Dungeon.win()` 전에 장면이 바뀌어 ⑥이 늘 `quit`이었다 → `Statistics.amuletObtained`도 보고 `won`을 보낸다 (그전에는 엔딩 단계를 판정할 수 없었다) |
+| F9 흉내 | 개발용 실행(`desktop:debug`)에서만, ⑫. 기록에 `simulated: true`. 입력 잠금은 F9를 막지 않고, AI가 누를 수 있는 키 목록에는 없다 |
+| 게임 창을 앞으로 가져오지 않기 | 화면은 PrintWindow로만 찍는다 (메모장으로 가린 게임 창도 찍힘, 11/17 확인). 명령 판단은 창·키보드·마우스를 건드리지 않는다. 키·클릭 판단은 게임 창이 맨 앞이 될 때까지 기다린다 (30초 제한 없앰). 앞으로 가져오는 때는 판 시작·재개(▶)·[게임 창 앞으로]뿐이고, Alt 키 흉내·AttachThreadInput은 쓰지 않는다. 최소화되면 찍지 않고 기다리며 `lost_game`으로 끝내지 않는다. F12 비상 해제는 게임 창이 맨 앞일 때만 받는다. 게임 창 제목은 `agent.py`의 `GAME_WINDOW_TITLE` 한 곳 (= `build.gradle`의 `appName`) |
+| 규칙 | 게임 판 [조작법] 맨 앞(키 설명 앞)에 명령 설명과 "이동·공격·줍기·계단·쉬기·탐색은 명령을 쓴다. 키·클릭은 창을 닫거나 명령으로 안 되는 것에만 쓴다". `config.json`에 `rules_version: 2` |
+| 게임 코드 | `AISetupScene`, `AIBridge`, `WndAIGoal`(새), `AICreditsScene`(새), `StartScene`(슬롯 한 줄), `AmuletScene`(승리 흐름 뒤 두 곳), `SPDSettings`, 문구 파일. 게임 규칙·던전 생성·시드·저장 형식은 안 고침 |
+
+- **비교 주의**: 11/17부터 게임 판의 AI 입력 규칙이 바뀌었다 (`rules_version: 2`). 목표 단계 번호의 뜻도 바뀌었다 (`goal_version: 2`의 2는 최종 보스, 그전 판의 2는 10층). `mvp.py` 판의 AI 입력은 바꾸기 전과 글자까지 같다 ✅.
+- 확인: ✅ `desktop:compileJava`, `py_compile`, `mvp.py --demo` / ✅ 가짜 게임 시험 34개(달성 창·⑩⑪⑫·크레딧 기록)와 23개(포커스·최소화·규칙 순서) / ✅ 실제 판 2번 (GPT-6 Luna, 목표 0, 11/18 새벽): [타이틀로]로 `goal_reached`, [다음 목표로]로 알림 한 번과 단계 1, 숨김 검사 clean
+- ⬜ 미확인: F9 흉내와 엔딩 크레딧(실제 게임), 슬롯 글자, 판 중 메모장 글쓰기(11/20 손 시험), 패널 ▶ 재개 때 게임 창이 앞으로 오는지, 다른 프로그램의 F12가 그대로 가는지
 
 ## 10. 남은 질문 · 미확인
 
@@ -538,7 +586,7 @@ AI 입력(규칙·도구 설명·큰 점검·교훈 쓰기 요청)과 `log.jsonl
 - ~~첫 판 튜토리얼(`SPDSettings.intro()`)이 AI 첫 판에 주는 영향~~ → 화면과 1층·배고픔이 달라서 튜토리얼이 남아 있으면 [AI로 시작]을 막았다 (9장 A-5-4).
 - 게임 창을 닫을 때 ⑥이 Python에 닿는지 (닿지 않아도 ⑦이 끊겨 멈춘다).
 - 앙크로 부활할 때: `gameOver()`가 불리지 않으므로 AI 판은 이어진다. 다만 죽는 순간 ⑦에 `alive: false`가 먼저 갈 수 있다. 게임에서 확인하지 않았다.
-- 아뮬렛 장면(26층)으로 갈 때 `quit`으로 보이는 것 (목표 밖).
+- ~~아뮬렛 장면(26층)으로 갈 때 `quit`으로 보이는 것~~ → A-6-6에서 고쳤다.
 - `Gdx.net` 요청이 실패할 때 걸리는 시간 (Python이 꺼져 있을 때 바로 실패하는지). → 확인 목록에 넣음.
 - ~~Flask 접속 기록에 요청 본문(키)이 정말 남지 않는지~~ → ✅ 남지 않는다 (9장 A-5-3 결과).
 - ~~세로 360×640(게임 안 180×320)에 이 항목이 모두 들어가는지~~ → ✅ 들어간다 (9장).

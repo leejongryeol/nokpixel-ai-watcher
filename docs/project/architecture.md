@@ -22,12 +22,13 @@ AI가 사람처럼 **게임 화면을 보고 키보드·마우스로 조작**한
 | 구성 요소 | 파일 | 역할 |
 |---|---|---|
 | 게임 | `desktop/.../DesktopLauncher.java` | 녹픽던 원본. 세로 창 3단계 크기와 모바일 화면·배율만 고정 (아래 "게임 창 크기와 AI 사진") |
-| AI 설정 장면 | `core/.../scenes/AISetupScene.java` (+ `HeroSelectScene` [시작], `SPDSettings` `ai_*`, `TextInput.setPasswordMode`, `scenes*.properties`) | 캐릭터 선택 → AI 설정 → 던전. Python에 상태를 묻고 키 보내기·연결 시험·판 준비(`config.json`)까지 한다. 관찰기가 꺼져 있으면 [AI 관찰기 켜기]로 `web.py --panels`를 새 명령 창에서 켠다. 게임에서 시작하는 판은 언제나 실제 조작. 던전 1층 도착(⑤)에서 AI 판이 자동으로 시작하고, `GameScene`의 `gameOver()`·`destroy()`에서 판 끝(⑥)을, AI 판 동안 1초마다 살아 있음 신호(⑦)를 보낸다 (A-5-4). 최종 목표는 단계 0~6에서 고르고, 이루면 다음 목표로 잇거나 판을 끝내 타이틀로 간다 (A-6-4, `GameScene.bossSlain()`에 한 줄). 자세한 것: [bridge.md](bridge.md) 3장·9장 |
+| AI 설정 장면 | `core/.../scenes/AISetupScene.java` (+ `HeroSelectScene` [시작], `SPDSettings` `ai_*`, `TextInput.setPasswordMode`, `scenes*.properties`) | 캐릭터 선택 → AI 설정 → 던전. Python에 상태를 묻고 키 보내기·연결 시험·판 준비(`config.json`)까지 한다. 관찰기가 꺼져 있으면 [AI 관찰기 켜기]로 `web.py --panels`를 새 명령 창에서 켠다. 게임에서 시작하는 판은 언제나 실제 조작. 던전 1층 도착(⑤)에서 AI 판이 자동으로 시작하고, `GameScene`의 `gameOver()`·`destroy()`에서 판 끝(⑥)을, AI 판 동안 1초마다 살아 있음 신호(⑦)를 보낸다 (A-5-4). 최종 목표는 단계 0~3에서 고른다 (A-6-6, 11/17). 0·1·2를 이루면 게임 안 달성 창에서 사람이 [다음 목표로]·[타이틀로]를 고르고, 3(엔딩)을 이루면 원작 승리 흐름 뒤에 크레딧 장면을 보인다. 보스 처치 판정은 `GameScene.bossSlain()`에 한 줄 (A-6-4). 자세한 것: [bridge.md](bridge.md) 3장·9장 |
 | 게임 ↔ Python 통로 | `core/.../AIBridge.java`, `web.py`의 `/api/bridge/*` | 게임이 `Gdx.net`으로 `127.0.0.1:8765`에 묻고, 응답은 렌더 스레드로 넘긴다. 실패해도 게임은 멈추지 않는다 |
 | 게임 데이터 | `core/.../GameState.java`, `AIBridge`의 ⑧ | 주인공이 입력을 기다리게 될 때마다 화면에 보이는 범위의 데이터(문자 지도 등)를 만들어 보낸다. 숨길 정보는 이 파일 안에서 걸러 낸다. Python은 `states/`에 저장하고 진행도 이정표(`milestones.json`)를 판정한다. 게임에서 시작한 판은 판단마다 AI 입력 [게임 정보]·[지도] 글로도 쓴다 (A-6-3, 11/14, [game-state.md](game-state.md) 10장) |
 | 게임 명령 | `AIBridge`의 ⑨, `agent.py`의 명령 도구 | 게임에서 시작한 판의 AI는 키·클릭 말고도 `move_to`·`attack`·`pick_up`·`take_stairs`·`rest`·`search`를 쓴다. 게임은 0.5초마다 명령을 묻고, 확인한 뒤 칸 누르기·툴바와 같은 함수로 실행한다 (A-6-5, 11/15, [game-state.md](game-state.md) 11장) |
+| 달성 창 · 엔딩 크레딧 | `core/.../windows/WndAIGoal.java`, `core/.../scenes/AICreditsScene.java`, `StartScene`(슬롯 한 줄), `AmuletScene`(승리 흐름 뒤 두 곳), `AIBridge`의 ⑩⑪⑫ | 달성 창이 떠 있는 동안 Python은 판단·명령을 멈추고 입력 잠금을 푼다. 슬롯 표시는 `SPDSettings`에 슬롯별 "시드\|목표 이름"으로 남기고, 슬롯이 비었거나 시드가 다르면 지운다 (저장 형식은 그대로). F9 달성 흉내는 개발용 실행(`DeviceCompat.isDebug()`)에서만 (A-6-6, [bridge.md](bridge.md) 9장) |
 | 숨김 검사 | `ai-bridge/check_hidden.py` | 판 끝에 상태 파일에서 시드·클래스 이름 등 금지 글자를 찾아 `config.json`의 `hidden_check`에 남긴다 |
-| AI 플레이어 | `ai-bridge/agent.py` | 화면 캡처 → AI 모델 호출(Claude / OpenAI) → 키·클릭 실행 → 기록 |
+| AI 플레이어 | `ai-bridge/agent.py` | 화면 캡처(PrintWindow) → AI 모델 호출(Claude / OpenAI) → 명령 또는 키·클릭 실행 → 기록 |
 | 관찰 웹 화면 | `ai-bridge/web.py`, `ai-bridge/web/` | 실시간 관찰, 리포트·되감기, 실험 설정 화면은 데모 전용 (내 컴퓨터에서만 접속) |
 | 두 창 관찰 화면 | `web/panel.html`, `web/log.html`, `ai-bridge/window_layout.py` | 관찰 패널(`/panel`), 판단별 상세는 기록 창(`/log`). `python web.py --panels`로 Edge 앱 창으로 띄우고 게임 창 오른쪽에 배치 |
 | 입력 잠금 | `ai-bridge/input_lock.py` | 게임의 AI 설정에서 준비한 실제 판 동안 게임 창의 사람 입력만 막는 별도 프로세스 (Windows 저수준 훅, AI 입력은 통과) |
@@ -37,10 +38,10 @@ AI가 사람처럼 **게임 화면을 보고 키보드·마우스로 조작**한
 
 ## 한 번의 판단 흐름
 
-1. **캡처**: 게임 창을 앞으로 가져와 스크린샷 → 360×640으로 줄임
+1. **캡처**: 게임 창을 앞으로 가져오지 않고 PrintWindow로 창 내용만 받아 → 360×640으로 줄임. 게임에서 시작한 판은 행동 뒤에 온 살아 있음 신호(⑦)가 1.5초 안에 있을 때만 찍는다 (게임이 지금 그리고 있다는 뜻). 최소화돼 있으면 찍지 않고 기다린다 (A-6-6)
 2. **전달**: 스크린샷 + 최근 판단 5개 + 현재 중간 목표 + 기억 메모 + (있으면) 개발자 힌트 + (조건에 따라) 공략 문서. "생각만" 모드면 최근 판단의 행동마다 `(실제로 실행 안 됨)`을 붙인다 (AI가 기록 속 행동을 실제로 했다고 믿지 않게)
 3. **판단**: AI 모델이 생각을 쓰고, 도구 하나로 행동 (생각을 받는 방식은 회사마다 다르다. 아래 "회사별 생각 전달 방식") (`press_keys` 또는 `click`, 말풍선·중간 목표·되새김(목표 연결, 근거)·기억 메모 추가/지우기 포함). 10번째마다, 중간 목표를 바꾼 다음에는 큰 점검을 요청
-4. **실행**: 도구를 실제 키 입력·클릭으로 바꿔 게임에 전달 ("생각만" 모드면 생략). 게임 창이 맨 앞이 아니면 키를 보내지 않고, 2초마다 다시 가져오며 최대 30초 기다린 뒤 그래도 안 되면 판을 멈춘다
+4. **실행**: 도구를 실제 키 입력·클릭으로 바꿔 게임에 전달 ("생각만" 모드면 생략). 게임 창이 맨 앞이 아니면 키를 보내지 않고, 앞으로 가져오지도 않고 사람이 게임 창을 누를 때까지 기다린다 (시간 제한 없음, A-6-6). 게임 명령은 ⑨로 넘기므로 창·키보드·마우스를 건드리지 않는다. 게임 창을 앞으로 가져오는 때는 판 시작·재개(▶)·[게임 창 앞으로]뿐이고, Alt 키 흉내·AttachThreadInput은 쓰지 않는다
 5. **기록**: `log.jsonl`과 스크린샷 저장 → 관찰 화면이 1초마다 읽어서 표시
 
 1번 전에, 관찰자가 관찰 패널의 힌트 칸에 입력하는 중이면 다음 판단을 최대 60초 미룬다 (게임 창이 입력 도중 앞으로 튀어나오지 않게). 게임은 턴제라 기다리는 동안 게임 상태는 바뀌지 않는다.
@@ -65,12 +66,12 @@ AI가 사람처럼 **게임 화면을 보고 키보드·마우스로 조작**한
 
 - **입력 잠금** (`input_lock.py`): AI 쪽 작업과 따로 도는 별도 프로세스에서 Windows 저수준 훅(`WH_MOUSE_LL`, `WH_KEYBOARD_LL`)을 건다. pyautogui(`SendInput`)가 보내는 입력에는 Windows가 "프로그램이 만든 입력" 표시를 붙이므로, 표시가 없는 사람 입력만 막는다.
   - 마우스는 게임 창 안쪽의 클릭·휠만, 키보드는 게임 창이 맨 앞일 때만 막는다.
-  - 풀리는 때: `Agent.run()`이 끝날 때(`finally`), 부모(`web.py`) 프로세스가 죽을 때, `web.py` 종료(`atexit`), 비상 해제 `F12`(조합키는 Ctrl·Shift가 먼저 막혀서 인식되지 않아 키 하나로 했다). 프로세스가 어떻게 끝나든 Windows가 훅을 자동으로 뺀다.
+  - 풀리는 때: `Agent.run()`이 끝날 때(`finally`), 부모(`web.py`) 프로세스가 죽을 때, `web.py` 종료(`atexit`), 달성 창이 뜰 때(고르면 다시 잠금, A-6-6), 비상 해제 `F12`(게임 창이 맨 앞일 때만, A-6-6. 조합키는 Ctrl·Shift가 먼저 막혀서 인식되지 않아 키 하나로 했다). 프로세스가 어떻게 끝나든 Windows가 훅을 자동으로 뺀다.
   - 별도 프로세스로 둔 이유: 훅 처리가 늦으면 Windows가 훅을 말없이 빼기 때문이다.
 - **판 시작은 게임의 AI 설정 장면**에서 한다 (`/api/bridge/run`이 판을 준비하고 `/api/bridge/arrived`에서 시작). 게임에서 시작한 판은 키·클릭마다 `Agent._guard()`가 살아 있음 신호를 확인해서, 판이 끝났거나 신호가 끊기면 키를 보내지 않는다. 패널의 시작(`/api/console/start`)은 없앴다. 데모 설정 화면의 `/api/start`는 `--demo`에서만 받고 `.env`에 쓰지 않는다. `.env`에 쓰는 곳은 `/api/bridge/key` 하나뿐이고 회사 키 한 줄만 쓴다.
 - 상태를 바꾸는 주소(`/api/bridge/*`, 중지, 힌트, 입력 중 표시, 게임 창 앞으로, 창 배치, 요약 만들기)는 `X-Nokpixel-Bridge: 1` 헤더가 있는 JSON 요청만 받는다 (다른 웹사이트 요청 막기). 웹 화면의 `api()`가 헤더를 붙이고, 기록 창이 닫힐 때 보내는 요청도 `sendBeacon` 대신 헤더를 붙인 `fetch(keepalive)`로 바꿨다.
 - Flask `app.run()`은 실행 폴더의 `.env`를 스스로 읽으므로 `load_dotenv=False`로 끄고, `web.py`가 고른 파일(기본 `ai-bridge/.env`, 시험할 때 `--env`)만 읽는다.
-- 관찰 패널·기록 창은 `/api/state?since=n`으로 새 판단만 받는다. 신호등·잠금 상태(`phase`, `game_front`, `focus_waiting`, `locked`)는 화면에만 쓰고 `log.jsonl`에는 넣지 않는다.
+- 관찰 패널·기록 창은 `/api/state?since=n`으로 새 판단만 받는다. 신호등·잠금 상태(`phase`, `game_front`, `focus_waiting`, `capture_waiting`, `locked`)는 화면에만 쓰고 `log.jsonl`에는 넣지 않는다.
 - 화면에는 힌트가 "⭐ 개발자 개입"으로 보이지만, AI 입력의 `[개발자 힌트]`와 기록의 `hints` 칸은 그대로다 (실험 조건 유지).
 - 개입 수(A-5-5)는 화면이 기록에서 센다: 힌트(`hints`) + 일시정지(`config.json`의 `pauses`) + F12 비상 해제(`unlocks`).
 

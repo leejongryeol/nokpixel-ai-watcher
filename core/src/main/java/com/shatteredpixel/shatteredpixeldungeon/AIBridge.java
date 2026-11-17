@@ -47,6 +47,7 @@ import com.shatteredpixel.shatteredpixeldungeon.scenes.InterlevelScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.TitleScene;
 import com.shatteredpixel.shatteredpixeldungeon.utils.DungeonSeed;
 import com.shatteredpixel.shatteredpixeldungeon.utils.GLog;
+import com.shatteredpixel.shatteredpixeldungeon.windows.WndAIGoal;
 import com.watabou.noosa.Game;
 import com.watabou.noosa.Scene;
 import com.watabou.utils.Callback;
@@ -111,6 +112,9 @@ public class AIBridge {
 	private static int lastCommandSeq = -1; //마지막으로 처리한 명령의 seq (같은 seq는 한 번만)
 	private static JsonValue lastCommand; //다음 ⑧의 last_command로 보낼 값
 
+	//달성 창 (A-6-6): ⑦·⑧ 응답의 goal_wait로 띄운다. 같은 번호의 창은 한 번만 띄운다
+	private static int goalWindowId;
+
 	//게임 메시지(GLog)를 모은다. 액터 스레드에서도 불리므로 잠근다. false를 돌려 화면 기록창도 그대로 받게 한다
 	private static final Signal.Listener<String> logListener = new Signal.Listener<String>() {
 		@Override
@@ -158,6 +162,7 @@ public class AIBridge {
 		commandAskedSeq = 0;
 		lastCommandSeq = -1;
 		lastCommand = null;
+		goalWindowId = 0;
 		synchronized (logLines) { logLines.clear(); }
 	}
 
@@ -274,7 +279,10 @@ public class AIBridge {
 			@Override
 			public void onResult(JsonValue result) {
 				//실패하면 버린다. 다음 대기 때 새 상태를 보낸다
-				if (result != null && runId.equals(activeRunId)) wantCommand = result.getBoolean("want_command", false);
+				if (result != null && runId.equals(activeRunId)) {
+					wantCommand = result.getBoolean("want_command", false);
+					showGoalWindow(result);
+				}
 			}
 		});
 	}
@@ -528,7 +536,49 @@ public class AIBridge {
 						//최종 목표를 이뤄 판을 끝냈다 (A-6-4): 게임 메뉴의 [타이틀로]와 같은 처리로 타이틀 화면에 간다.
 						//activeRunId를 먼저 지웠으므로 GameScene.destroy()에서 ⑥(quit)을 보내지 않는다
 						if (result.getBoolean("goto_title", false)) goToTitle();
+					} else {
+						showGoalWindow(result);
 					}
+				}
+			}
+		});
+	}
+
+	//⑦·⑧ 응답에 goal_wait가 있으면 달성 창을 띄운다 (A-6-6). 던전 화면에서만, 같은 번호는 한 번만
+	private static void showGoalWindow( JsonValue result ){
+		JsonValue w = result.get("goal_wait");
+		if (w == null || !w.isObject() || !(Game.scene() instanceof GameScene)) return;
+		int id = w.getInt("id", 0);
+		if (id <= goalWindowId) return;
+		goalWindowId = id;
+		GameScene.show(new WndAIGoal(id, w.getString("reached", ""), w.getInt("step", 0), w.getString("next", "")));
+	}
+
+	//달성 창에서 고른 것을 Python에 보낸다 (⑩). Python이 받지 않으면 다음 ⑦ 응답에 창이 다시 뜨게 한다.
+	//[타이틀로]는 Python이 마지막 화면을 찍은 뒤 ⑦ 응답의 goto_title로 간다. 관찰기가 꺼져 있으면 게임이 바로 간다
+	public static void goalChoice( final int id, final String choice ){
+		final String runId = activeRunId;
+		if (runId == null) {
+			if (choice.equals("title")) goToTitle();
+			return;
+		}
+		JsonValue body = object();
+		body.addChild("run_id", new JsonValue(runId));
+		body.addChild("id", new JsonValue(id));
+		body.addChild("choice", new JsonValue(choice));
+		post("/api/bridge/goal_choice", body, SHORT_TIMEOUT, new Listener() {
+			@Override
+			public void onResult(JsonValue result) {
+				if (!runId.equals(activeRunId)) return;
+				if (result == null) {
+					if (choice.equals("title")) {
+						activeRunId = null; //⑥(quit)을 보내지 않는다
+						goToTitle();
+					} else if (goalWindowId == id) {
+						goalWindowId = id - 1;
+					}
+				} else if (!result.getBoolean("ok", false) && goalWindowId == id) {
+					goalWindowId = id - 1;
 				}
 			}
 		});

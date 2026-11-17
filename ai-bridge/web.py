@@ -364,7 +364,7 @@ def bridge_heartbeat():
         return jsonify({"ok": False, "reason": "not_running"}), 409
     a.heartbeat(data.get("alive") is not False, int_or_none(data.get("depth")),
                 int_or_none(data.get("state_seq")), data.get("waiting") is True)
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "goal_wait": a.goal_wait_view()})  # 달성 창 (A-6-6). 없으면 null
 
 
 @app.post("/api/bridge/state")
@@ -381,7 +381,7 @@ def bridge_state():
         return jsonify({"ok": False, "reason": "not_running"}), 409
     if not a.receive_state(data):
         return jsonify({"ok": False, "reason": "bad_state"}), 400
-    return jsonify({"ok": True, "want_command": a.wants_commands()})
+    return jsonify({"ok": True, "want_command": a.wants_commands(), "goal_wait": a.goal_wait_view()})
 
 
 @app.post("/api/bridge/command")
@@ -394,6 +394,20 @@ def bridge_command():
     if not a:
         return jsonify({"command": None, "reason": "not_running"}), 409
     return jsonify({"command": a.take_command(int_or_none(data.get("seq")))})
+
+
+@app.post("/api/bridge/goal_choice")
+@bridge_only
+def bridge_goal_choice():
+    """⑩ 달성 창에서 사람이 고른 것 (A-6-6): {run_id, id, choice: next / title}.
+    next면 다음 판단부터 새 최종 목표로 이어 가고, title이면 판을 끝낸다 (게임은 ⑦ 응답의 goto_title로 타이틀에 감)."""
+    data = body()
+    a = running_agent(data.get("run_id"))
+    if not a:
+        return jsonify({"ok": False, "reason": "not_running"}), 409
+    if not a.goal_choice(int_or_none(data.get("id")), data.get("choice")):
+        return jsonify({"ok": False, "reason": "bad_choice"}), 400
+    return jsonify({"ok": True})
 
 
 @app.post("/api/bridge/ended")

@@ -827,6 +827,10 @@ class Agent:
         # 최종 목표 달성 (A-6-4)
         self._goal_notice_from = []  # 다음 목표로 넘어갔지만 아직 AI에게 알리지 않은 이전 목표 문장
         self._title = None  # 끝내기로 판을 끝낸 뒤 게임을 타이틀로 보내기: None → wait(마지막 화면 찍는 중) → ready → sent
+        # 달성 창 (A-6-6): 단계 0·1·2를 이루면 사람이 게임 안 창에서 [다음 목표로]/[타이틀로]를 고를 때까지 기다린다.
+        # 기다리는 동안 판단·키·클릭·명령을 하지 않는다. {"id", "stage", "name", "step", "depth", "next_name", "asked_at", "discarded_cost_usd"}
+        self._goal_wait = None
+        self._goal_wait_seq = 0
         # 게임 명령 (A-6-5): ⑨로 게임이 가져갈 명령 {"seq", "name", "args"}. 가져가면 비운다
         self._command = None
         self._command_taken_at = 0.0
@@ -852,8 +856,9 @@ class Agent:
             self.input_lock.stop()
 
     def pause(self):
-        """일시정지: 키 보내기를 멈추고 입력 잠금을 바로 풀어 사람이 조작할 수 있게 한다. 판은 끝나지 않는다."""
-        if self.status != "running" or self._stop.is_set() or self._paused.is_set():
+        """일시정지: 키 보내기를 멈추고 입력 잠금을 바로 풀어 사람이 조작할 수 있게 한다. 판은 끝나지 않는다.
+        달성 창이 떠 있는 동안은 이미 사람 차례라서 받지 않는다."""
+        if self.status != "running" or self._stop.is_set() or self._paused.is_set() or self._goal_wait:
             return False
         self._pause = {"step": self.step, "from": datetime.now().isoformat(timespec="seconds"), "discarded_cost_usd": 0.0}
         self._paused.set()
@@ -918,7 +923,7 @@ class Agent:
         while True:
             if self._stop.is_set():
                 raise StopRequested()
-            if self._paused.is_set():
+            if self._paused.is_set() or self._goal_wait:  # 달성 창이 뜨면 남은 키·명령도 보내지 않는다 (A-6-6)
                 raise PauseRequested()
             if not self._watch_game:
                 return
@@ -1033,8 +1038,8 @@ class Agent:
 
     def _judge_goal(self, record, depth, won=False):
         """지금 최종 목표 단계를 이뤘는지 본다 (self._lock 안에서 부른다). 판정은 GOAL_STAGES의 세 번째 값.
-        이뤘으면 goals_reached에 남기고 판을 끝낸다."""
-        if self.config.get("goal_version") != GOAL_VERSION or self.end_reason:
+        이뤘으면 goals_reached에 남긴다. 엔딩(won)이면 판을 끝내고, 그 밖은 달성 창을 띄우게 하고 사람의 선택을 기다린다."""
+        if self.config.get("goal_version") != GOAL_VERSION or self.end_reason or self._goal_wait:
             return
         bosses = record.get("bosses_slain") if isinstance(record.get("bosses_slain"), list) else []
         stage = self.config["goal_stage_now"]
@@ -1047,12 +1052,48 @@ class Agent:
             hit = judge in bosses
         if not hit:
             return
+        now = datetime.now().isoformat(timespec="seconds")
         self.config["goals_reached"].append({"stage": stage, "name": name, "goal": goal, "step": self.step,
-                                             "at": datetime.now().isoformat(timespec="seconds"), "depth": depth})
+                                             "at": now, "depth": depth})
         self._save_config()
-        if not won:  # 엔딩은 게임이 이미 엔딩 화면으로 가므로 타이틀로 보내지 않는다
-            self._title = "wait"
-        self.end_game("goal_reached", depth)
+        if won:  # 엔딩: 게임은 이미 원작 엔딩 화면으로 갔다. 판을 끝낸다
+            self.end_game("goal_reached", depth)
+            return
+        self._goal_wait_seq += 1
+        self._goal_wait = {"id": self._goal_wait_seq, "stage": stage, "name": name, "step": self.step, "depth": depth,
+                           "next_name": GOAL_STAGES[stage + 1][1], "asked_at": now, "discarded_cost_usd": 0.0}
+        if self.input_lock is not None:  # 사람이 창의 버튼을 누를 수 있게 잠금을 푼다 (개입이 아니라 판 진행 결정)
+            self.input_lock.stop()
+
+    def goal_wait_view(self):
+        """⑦·⑧ 응답의 goal_wait: 게임이 달성 창에 쓰는 값. 기다리는 중이 아니면 None."""
+        w = self._goal_wait
+        if not w:
+            return None
+        return {"id": w["id"], "stage": w["stage"], "reached": w["name"], "step": w["step"], "next": w["next_name"]}
+
+    def goal_choice(self, wait_id, choice):
+        """달성 창에서 사람이 고른 것 (A-6-6). next: 다음 단계를 최종 목표로 / title: 판을 끝내고 게임은 타이틀로.
+        config.json의 goal_choices에 남긴다 (pauses·unlocks가 아니므로 개입 수에 들어가지 않는다). 받았으면 True."""
+        with self._lock:
+            w = self._goal_wait
+            if not w or w["id"] != wait_id or choice not in ("next", "title") or self.end_reason:
+                return False
+            self.config.setdefault("goal_choices", []).append({
+                "stage": w["stage"], "name": w["name"], "choice": choice, "step": w["step"],
+                "asked_at": w["asked_at"], "chosen_at": datetime.now().isoformat(timespec="seconds"),
+                "discarded_cost_usd": round(w["discarded_cost_usd"], 6)})
+            self._goal_wait = None
+            if choice == "next":  # 다음 판단 맨 앞에 "최종 목표 달성: …. 새 최종 목표: …." (기존 알림 경로)
+                stage = w["stage"] + 1
+                self._goal_notice_from.append(GOAL_STAGES[w["stage"]][0])
+                self.config.update(goal_stage_now=stage, goal_name=GOAL_STAGES[stage][1], final_goal=GOAL_STAGES[stage][0])
+                self._save_config()
+                return True
+            self._save_config()
+            self._title = "wait"  # 마지막 화면을 찍은 뒤 ⑦ 응답으로 게임을 타이틀로 보낸다 (A-6-4 방식)
+            self.end_game("goal_reached", w["depth"])
+            return True
 
     def wants_commands(self):
         """⑧ 응답의 want_command: 게임에서 시작한 판은 명령 도구를 쓰므로 게임이 ⑨로 묻게 한다."""
@@ -1061,7 +1102,7 @@ class Agent:
     def take_command(self, seq):
         """⑨ 게임이 묻는 명령. 일시정지·중지·한도 도달·판 끝 중에는 넘기지 않는다. 넘긴 명령은 지운다 (한 번만)."""
         with self._lock:
-            if (self.status != "running" or self._stop.is_set() or self._paused.is_set()
+            if (self.status != "running" or self._stop.is_set() or self._paused.is_set() or self._goal_wait
                     or self.phase == "limit" or self.end_reason or self._command is None):
                 return None
             command, self._command = self._command, None
@@ -1247,6 +1288,7 @@ class Agent:
                     break
                 self._wait_while_typing()
                 self._wait_while_paused(game)
+                self._wait_for_goal_choice(game)
                 if self._stop.is_set():
                     final_status = "stopped"
                     break
@@ -1273,8 +1315,9 @@ class Agent:
                 else:
                     thought, action, usage = self._ask(client, system, image, hints, checkpoint, game_data)
 
-                if self._paused.is_set() and not self._stop.is_set():
+                if (self._paused.is_set() or self._goal_wait) and not self._stop.is_set():
                     # 생각하는 동안 일시정지: 사람이 조작해 화면이 바뀌므로 이 판단은 버리고, 재개 뒤 같은 번호로 다시 생각한다
+                    # 생각하는 동안 최종 목표 달성(A-6-6): 지난 목표로 한 판단이므로 버리고, 사람이 고른 뒤 같은 번호로 다시 생각한다
                     self._discard(usage, hints, game_data)
                     continue
                 self._record(step, image_name, thought, action, usage, hints, checkpoint, game_data)
@@ -1410,6 +1453,22 @@ class Agent:
         if self.input_lock is not None:
             self.input_lock.start(game.hwnd)
 
+    def _wait_for_goal_choice(self, game):
+        """달성 창 (A-6-6): 사람이 고를 때까지 판단하지 않고 기다린다 (비용 없음). 게임이 살아 있는지는 계속 본다.
+        [다음 목표로]면 게임 창을 앞으로 가져오고 입력 잠금을 다시 건다. [타이틀로]면 판이 끝나 있다."""
+        if not self._goal_wait:
+            return
+        while self._goal_wait and not self._stop.is_set():
+            self.phase = "goal_wait"
+            self._check_game_waiting(game)
+            self._stop.wait(0.3)
+        if self._stop.is_set():
+            return
+        if hasattr(game, "focus"):
+            game.focus()
+        if self.input_lock is not None:
+            self.input_lock.start(game.hwnd)
+
     def _discard(self, usage, hints, game_data=None):
         """일시정지로 버린 판단: 기록(log.jsonl)에는 남기지 않고, 든 비용만 합계와 config.json의 pauses에 더한다.
         받은 힌트와 게임 메시지는 다음 판단에 다시 준다."""
@@ -1425,6 +1484,8 @@ class Agent:
                 self._goal_notice_from = game_data["goal_notice_from"] + self._goal_notice_from
         if self._pause is not None:
             self._pause["discarded_cost_usd"] += cost
+        elif self._goal_wait is not None:  # 달성 창 때문에 버린 판단 (A-6-6)
+            self._goal_wait["discarded_cost_usd"] += cost
 
     def _wait_while_typing(self):
         while time.time() < self._typing_until and not self._stop.is_set():

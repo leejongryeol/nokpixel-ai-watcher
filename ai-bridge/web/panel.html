@@ -228,6 +228,7 @@ function light(s) {
   }
   if (s.paused) return ["yellow", "일시정지 · 사람이 조작할 수 있어요"];
   if (s.phase === "limit") return ["yellow", "한도 도달 · 늘리거나 끝내 주세요"];
+  if (s.phase === "goal_wait") return ["yellow", "달성 · 사람의 선택을 기다리는 중"];
   if (s.phase === "waiting_game") return ["yellow", "게임 신호를 기다리는 중 (층 이동 등)"];
   if (s.focus_waiting) return ["yellow", "게임 창을 기다리는 중"];
   if (s.typing) return ["yellow", "힌트 입력 중이라 기다리는 중"];

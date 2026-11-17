@@ -197,6 +197,7 @@ public class StartScene extends PixelScene {
 			this.slot = slot;
 			GamesInProgress.Info info = GamesInProgress.check(slot);
 			newGame = info == null;
+			String aiGoal = SPDSettings.aiGoalMark(slot, info); //[nokpixel-ai-watcher] AI가 이 판에서 이룬 최종 목표 (A-6-6). 빈 슬롯이면 기록을 지운다
 			if (newGame){
 				name.text( Messages.get(StartScene.class, "new"));
 				
@@ -271,6 +272,7 @@ public class StartScene extends PixelScene {
 					depth.resetColor();
 					level.resetColor();
 				}
+				if (aiGoal != null) { lastPlayed.text(Messages.get(StartScene.class, "ai_goal", aiGoal)); lastPlayed.hardlight(Window.TITLE_COLOR); }
 
 				if (info.daily){
 					if (info.dailyReplay){

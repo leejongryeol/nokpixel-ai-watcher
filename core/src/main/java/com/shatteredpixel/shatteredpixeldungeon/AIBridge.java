@@ -551,6 +551,8 @@ public class AIBridge {
 		int id = w.getInt("id", 0);
 		if (id <= goalWindowId) return;
 		goalWindowId = id;
+		//이어하기 슬롯 화면에 "AI 최종 목표 달성! (이름)"을 보이도록 슬롯마다 기록한다 (저장 파일은 그대로)
+		SPDSettings.aiGoalMark(GamesInProgress.curSlot, Dungeon.seed, w.getString("reached", ""));
 		GameScene.show(new WndAIGoal(id, w.getString("reached", ""), w.getInt("step", 0), w.getString("next", "")));
 	}
 
@@ -620,6 +622,7 @@ public class AIBridge {
 			public void onResult(JsonValue result) {
 				if (result != null && result.getBoolean("ok", false)) {
 					resetState(); //⑧ 상태 번호와 비교 값을 새 판으로 (다음 프레임에 첫 상태 start를 보낸다)
+					SPDSettings.aiGoalMark(GamesInProgress.curSlot, Dungeon.seed, ""); //이 슬롯의 지난 판 달성 표시를 지운다 (A-6-6)
 					activeRunId = runId;
 					sinceHeartbeat = HEARTBEAT_EVERY; //첫 신호를 바로 보낸다
 					deathSent = false;

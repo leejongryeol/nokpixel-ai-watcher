@@ -544,4 +544,25 @@ public class SPDSettings extends GameSettings {
 	public static String aiGoal(){
 		return getString( KEY_AI_GOAL, "", 100 );
 	}
+
+	//[nokpixel-ai-watcher] 슬롯마다 AI가 이룬 최종 목표 (A-6-6). 저장 파일 형식은 바꾸지 않고 설정에 "시드|목표 이름"으로 둔다.
+	//슬롯이 비었거나(지움·사망·승리) 시드가 다른 새 판이면 표시하지 않고 지운다
+
+	public static final String KEY_AI_GOAL_SLOT     = "ai_goal_slot_";
+
+	public static void aiGoalMark( int slot, long seed, String name ){
+		put( KEY_AI_GOAL_SLOT + slot, name == null || name.isEmpty() ? "" : seed + "|" + name );
+	}
+
+	//그 슬롯의 게임에 맞는 기록이면 목표 이름, 아니면 null (맞지 않는 기록은 지운다)
+	public static String aiGoalMark( int slot, GamesInProgress.Info info ){
+		String value = getString( KEY_AI_GOAL_SLOT + slot, "" );
+		if (value.isEmpty()) return null;
+		int bar = value.indexOf('|');
+		if (info == null || bar <= 0 || !value.substring(0, bar).equals(Long.toString(info.seed))) {
+			put( KEY_AI_GOAL_SLOT + slot, "" );
+			return null;
+		}
+		return value.substring(bar + 1);
+	}
 }

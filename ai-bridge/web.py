@@ -388,11 +388,15 @@ def bridge_state():
 @bridge_only
 def bridge_command():
     """⑨ 명령 받기 (A-6-5): 게임이 주인공이 입력을 기다리는 동안 0.5초마다 묻는다. 명령은 한 번만 넘기고 지운다.
-    일시정지·중지·한도 도달·판 끝 중에는 null."""
+    일시정지·중지·한도 도달·판 끝 중에는 null.
+    명령 묶음 중(A-6-7)에는 plan_seq를 실어 다음 명령 전에 묻는다: {"continue": 이어 가도 되는지, "why": 안 되는 이유}."""
     data = body()
     a = running_agent(data.get("run_id"))
     if not a:
-        return jsonify({"command": None, "reason": "not_running"}), 409
+        return jsonify({"command": None, "continue": False, "why": "ended", "reason": "not_running"}), 409
+    if "plan_seq" in data:
+        ok, why = a.plan_continue(int_or_none(data.get("plan_seq")))
+        return jsonify({"command": None, "continue": ok, "why": why})
     return jsonify({"command": a.take_command(int_or_none(data.get("seq")))})
 
 

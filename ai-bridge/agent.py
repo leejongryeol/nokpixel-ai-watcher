@@ -310,8 +310,43 @@ def load_lessons(run_id):
     return read_text(os.path.join(LOGS_DIR, os.path.basename(run_id), LESSONS_FILE))
 
 
+DEEP_CHECK_REASONS = {  # 게임에서 시작한 판의 큰 점검 이유 (A-6-7). 10번마다는 하지 않는다
+    "level_changed": "층 이동 뒤 첫 판단", "goal_reached": "최종 목표 달성 뒤 첫 판단",
+    "hp_below_half": "체력이 절반 아래로 내려감", "same_command_failed": "같은 명령이 두 번 연속 실행 안 됨",
+    "goal_changed": "방금 중간 목표를 바꿈",
+}
+
+
+def _command_failed(entry):
+    """게임이 그 판단의 명령을 실행하지 않았는지 (묶음은 하나도 실행하지 않았을 때)."""
+    outcome = (entry.get("command_outcome") or {}).get("outcome")
+    return outcome in COMMAND_OUTCOMES or outcome == "not_taken"
+
+
+def deep_check_codes(entries, hero, goal_notice, memory):
+    """게임에서 시작한 판의 큰 점검 이유 코드 목록과, 이 판단이 기록되면 남길 기억 {"depth", "low_hp"}.
+    hero: 가장 최근 상태의 주인공 (없으면 {}). memory: 지난 판단 때의 기억."""
+    codes = []
+    depth, hp, ht = hero.get("depth"), hero.get("hp"), hero.get("ht")
+    if isinstance(depth, int) and memory.get("depth") is not None and depth != memory["depth"]:
+        codes.append("level_changed")
+    if goal_notice:
+        codes.append("goal_reached")
+    low = isinstance(hp, int) and isinstance(ht, int) and ht > 0 and hp * 2 < ht
+    if low and not memory.get("low_hp"):  # 절반 아래로 내려간 첫 판단만. 절반 이상으로 돌아오면 다시 셀 수 있다
+        codes.append("hp_below_half")
+    if (len(entries) >= 2 and all(e.get("command") and _command_failed(e) for e in entries[-2:])
+            and entries[-1]["command"] == entries[-2]["command"]):
+        codes.append("same_command_failed")
+    if entries and entries[-1].get("goal_changed") and len(entries) > 1:
+        codes.append("goal_changed")
+    remember = {"depth": depth if isinstance(depth, int) else memory.get("depth"),
+                "low_hp": low if isinstance(hp, int) and isinstance(ht, int) else memory.get("low_hp", False)}
+    return codes, remember
+
+
 def checkpoint_reason(step, entries):
-    """큰 점검이 필요한 이유. 필요 없으면 빈 글. (층 이동은 게임 코드 연결 후 추가)"""
+    """mvp.py·옛 설정 화면 판(화면만)의 큰 점검 이유: 10번마다 + 중간 목표를 바꿨을 때. 필요 없으면 빈 글."""
     reasons = []
     if step % CHECKPOINT_EVERY == 0:
         reasons.append(f"{step}번째 판단")
@@ -889,6 +924,8 @@ class Agent:
         self.config["tool_set"] = "keys_click_commands" if game_run else "keys_click"
         if game_run:  # 판단 한 번에 명령 묶음(plan)도 낼 수 있음 (A-6-7). 이 칸이 없는 옛 기록은 single
             self.config["decision_mode"] = "plan"
+        # 큰 점검: 게임에서 시작한 판은 사건 때만 (A-6-7), mvp.py 판은 지금처럼 10번마다. 이 칸이 없는 옛 기록은 every10
+        self.config["deep_check_mode"] = "event" if game_run else "every10"
         if self.config["guide"]:  # 어떤 공략 문서로 돌린 판인지
             self.config["guide_version"] = guide_version()
         safe_player = "".join(c for c in self.config["player"] if c.isalnum() or c in "-_") or "player"
@@ -943,6 +980,7 @@ class Agent:
         self._command = None
         self._command_taken_at = 0.0
         self._plan_seq = None  # 지금 기다리는 명령 묶음의 seq (A-6-7). 게임이 다음 명령 전에 이어 가도 되는지 묻는다
+        self._deep_memory = {"depth": None, "low_hp": False}  # 큰 점검 사건을 가리려고 지난 판단 때 본 층·체력 (A-6-7)
         # 세 창 관찰 화면용 (기록·AI 입력에는 들어가지 않는다)
         self.phase = "ready"  # ready → capture → thinking → acting → (typing) … → (limit) → done
         self.game = None
@@ -1488,7 +1526,16 @@ class Agent:
 
                 with self._lock:
                     hints, self._hints = self._hints, []
-                checkpoint = checkpoint_reason(step, self.entries)
+                deep_codes, deep_memory = None, None
+                if self._watch_game:  # 사건 때만 큰 점검 (A-6-7). 기억은 판단을 기록할 때 남긴다 (버린 판단은 다시 셈)
+                    with self._lock:
+                        hero = (self._last_state[1].get("hero") or {}) if self._last_state else {}
+                    deep_codes, deep_memory = deep_check_codes(self.entries, hero, (game_data or {}).get("goal_notice"),
+                                                               self._deep_memory)
+                    checkpoint = " · ".join(DEEP_CHECK_REASONS[c] for c in deep_codes)
+                    game_data["deep_check_reason"] = deep_codes
+                else:
+                    checkpoint = checkpoint_reason(step, self.entries)
 
                 self.phase = "thinking"
                 if self.config["demo"]:
@@ -1502,6 +1549,8 @@ class Agent:
                     self._discard(usage, hints, game_data)
                     continue
                 self._record(step, image_name, thought, action, usage, hints, checkpoint, game_data)
+                if deep_memory is not None:
+                    self._deep_memory = deep_memory
                 if self._stop.is_set():  # 생각하는 동안 판이 끝났으면 행동하지 않는다
                     final_status = "stopped"
                     break
@@ -1756,6 +1805,7 @@ class Agent:
                     entry["state_same_wait"] = True
                 if game_data.get("goal_notice"):  # 이 판단에 준 최종 목표 달성 알림 (A-6-4)
                     entry["goal_notice"] = game_data["goal_notice"]
+                entry["deep_check_reason"] = game_data.get("deep_check_reason") or []  # 큰 점검 이유 코드 (A-6-7). 없으면 []
             self.entries.append(entry)
             self.total_cost += cost
             self.total_tokens += usage["input_tokens"] + usage["output_tokens"]

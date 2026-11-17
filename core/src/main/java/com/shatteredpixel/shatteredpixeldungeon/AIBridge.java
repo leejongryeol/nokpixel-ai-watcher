@@ -118,6 +118,28 @@ public class AIBridge {
 	private static int lastCommandSeq = -1; //마지막으로 처리한 명령의 seq (같은 seq는 한 번만)
 	private static JsonValue lastCommand; //다음 ⑧의 last_command로 보낼 값
 
+	//명령 묶음 (A-6-7, game-state.md 3-5): plan으로 받은 명령 1~5개를 차례로 실행한다.
+	//명령 하나가 끝나 주인공이 다시 기다리면 사건을 보고, 사건이 있으면 남은 명령을 버리고 상태(⑧)를 보낸다.
+	//사건이 없으면 다음 명령 전에 Python에 이어 가도 되는지 묻는다 (일시정지·중지·달성 창은 Python만 안다).
+	//묶음이 도는 동안은 상태를 보내지 않으므로 상태 번호가 그대로이고, ⑨로 새 명령도 묻지 않는다 (commandAskedSeq == stateSeq)
+	public static final int PLAN_MAX = 5;
+	private static class PlanStep {
+		final String name, until;
+		final int x, y;
+		PlanStep( String name, int x, int y, String until ){
+			this.name = name; this.x = x; this.y = y; this.until = until;
+		}
+	}
+	private static final ArrayList<PlanStep> planSteps = new ArrayList<>();
+	private static boolean planActive;
+	private static int planSeq;
+	private static int planStarted; //실행을 시작한 명령 개수
+	private static String planStop; //남은 명령을 버린 이유. null이면 끝까지 실행함
+	private static String planRejected; //실행하지 않은 명령의 이유 (planStop이 rejected일 때)
+	private static int planHP; //지금 명령을 시작할 때 체력 (줄면 사건)
+	private static boolean planDoor; //묶음을 시작할 때 문 통과 여부 (바뀌면 목표 판정을 위해 멈춤)
+	private static int planBosses; //묶음을 시작할 때 처치한 보스 수
+
 	//달성 창 (A-6-6): ⑦·⑧ 응답의 goal_wait로 띄운다. 같은 번호의 창은 한 번만 띄운다
 	private static int goalWindowId;
 
@@ -169,6 +191,8 @@ public class AIBridge {
 		commandAskedSeq = 0;
 		lastCommandSeq = -1;
 		lastCommand = null;
+		planActive = false;
+		planSteps.clear();
 		goalWindowId = 0;
 		synchronized (logLines) { logLines.clear(); }
 	}
@@ -220,12 +244,33 @@ public class AIBridge {
 		Hero hero = Dungeon.hero;
 		boolean waiting = hero != null && hero.isAlive() && hero.ready && hero.curAction == null && Dungeon.level != null
 				&& InterlevelScene.mode == InterlevelScene.Mode.NONE;
-		if (waiting && !wasWaiting) sendState(false);
+		if (waiting && !wasWaiting) {
+			wasWaiting = true;
+			if (planActive) afterPlanStep(); //묶음 중: 사건을 보고 다음 명령으로 가거나 상태를 보낸다
+			else sendState(false);
+			return;
+		}
 		wasWaiting = waiting;
 	}
 
-	//rejected: 명령을 실행하지 않아 주인공이 같은 대기에 그대로 있을 때. 이유는 rejected 하나로 보낸다 (3-3)
+	//보이는 적 (정체 전 미믹 제외)
+	private static HashSet<Integer> visibleEnemies(){
+		HashSet<Integer> enemies = new HashSet<>();
+		for (Mob m : Dungeon.level.mobs.toArray(new Mob[0])){
+			if (GameState.seenChar(m, Dungeon.level) && m.alignment == Char.Alignment.ENEMY && !(m instanceof Mimic && m.alignment == Char.Alignment.NEUTRAL)){
+				enemies.add(m.id());
+			}
+		}
+		return enemies;
+	}
+
 	private static void sendState( boolean rejected ){
+		sendState(rejected, false);
+	}
+
+	//rejected: 명령을 실행하지 않아 주인공이 같은 대기에 그대로 있을 때. 이유는 rejected 하나로 보낸다 (3-3)
+	//alsoRejected: 묶음의 앞 명령은 실행했고 뒤 명령을 실행하지 않았을 때. 평소 이유에 rejected를 더한다 (A-6-7)
+	private static void sendState( boolean rejected, boolean alsoRejected ){
 		Hero hero = Dungeon.hero;
 		ArrayList<JsonValue> log;
 		synchronized (logLines) {
@@ -234,13 +279,7 @@ public class AIBridge {
 		}
 		JsonValue ai = GameState.build(log);
 
-		//보이는 적 (정체 전 미믹 제외)
-		HashSet<Integer> enemies = new HashSet<>();
-		for (Mob m : Dungeon.level.mobs.toArray(new Mob[0])){
-			if (GameState.seenChar(m, Dungeon.level) && m.alignment == Char.Alignment.ENEMY && !(m instanceof Mimic && m.alignment == Char.Alignment.NEUTRAL)){
-				enemies.add(m.id());
-			}
-		}
+		HashSet<Integer> enemies = visibleEnemies();
 
 		//끝난 이유 (game-state.md 3-3). Hero는 고치지 않고 직전 상태와 비교해서 정한다
 		JsonValue reasons = GameState.array();
@@ -265,6 +304,7 @@ public class AIBridge {
 			}
 			if (hero.lastAction != null) reasons.addChild(new JsonValue("interrupted"));
 			if (GameScene.interfaceBlockingHero()) reasons.addChild(new JsonValue("window"));
+			if (alsoRejected) reasons.addChild(new JsonValue("rejected"));
 			if (reasons.size == 0) reasons.addChild(new JsonValue("done"));
 		}
 		prevDepth = Dungeon.depth;
@@ -323,6 +363,10 @@ public class AIBridge {
 		lastCommandSeq = seq;
 		commandAskedSeq = stateSeq;
 		String name = c.getString("name", "");
+		if (name.equals("plan")) {
+			startPlan(seq, c.get("commands"));
+			return;
+		}
 		JsonValue args = c.get("args");
 		int x = args != null ? args.getInt("x", Integer.MIN_VALUE) : Integer.MIN_VALUE;
 		int y = args != null ? args.getInt("y", Integer.MIN_VALUE) : Integer.MIN_VALUE;
@@ -352,6 +396,136 @@ public class AIBridge {
 			wasWaiting = false; //행동이 턴 없이 끝나도(길 없음 등) 다음 대기에서 새 상태를 보낸다
 		} else {
 			sendState(true); //주인공은 같은 대기 그대로. 새 상태 번호로 실행 안 함을 알린다
+		}
+	}
+
+	//명령 묶음 시작 (A-6-7): 명령 목록을 새로 만들어 두고 첫 명령을 실행한다
+	private static void startPlan( int seq, JsonValue list ){
+		planSteps.clear();
+		if (list != null && list.isArray()) {
+			for (JsonValue s : list) {
+				if (planSteps.size() >= PLAN_MAX) break;
+				if (!s.isObject()) continue;
+				JsonValue args = s.get("args");
+				int x = Integer.MIN_VALUE, y = Integer.MIN_VALUE;
+				String until = "turn";
+				if (args != null && args.isObject()) {
+					x = args.getInt("x", Integer.MIN_VALUE);
+					y = args.getInt("y", Integer.MIN_VALUE);
+					until = args.getString("until", "turn");
+				}
+				planSteps.add(new PlanStep(s.getString("name", ""), x, y, until));
+			}
+		}
+		planSeq = seq;
+		planStarted = 0;
+		planStop = null;
+		planRejected = null;
+		planDoor = doorPassed;
+		synchronized (bossesSlain) { planBosses = bossesSlain.size(); }
+		if (planSteps.isEmpty()) {
+			planStop = "rejected";
+			planRejected = "bad_command";
+			finishPlan();
+			return;
+		}
+		planActive = true;
+		runPlanStep(seq);
+	}
+
+	//묶음의 다음 명령을 실행한다. 실행하지 않으면 남은 명령을 버리고 상태를 보낸다
+	private static void runPlanStep( int seq ){
+		PlanStep s = planSteps.get(planStarted);
+		planHP = Dungeon.hero != null ? Dungeon.hero.HP : 0;
+		String outcome;
+		try {
+			outcome = execute(seq, s.name, s.x, s.y, s.until);
+		} catch (Exception e) {
+			Game.reportException(e);
+			outcome = "error";
+		}
+		if (outcome != null) {
+			planStop = "rejected";
+			planRejected = outcome;
+			finishPlan();
+			return;
+		}
+		planStarted++;
+		wasWaiting = false; //행동이 턴 없이 끝나도 다음 대기에서 afterPlanStep으로 온다
+	}
+
+	//묶음의 명령 하나가 끝나 주인공이 다시 기다릴 때: 사건이 있거나 다 했으면 상태를 보내고, 아니면 Python에 이어 가도 되는지 묻는다
+	private static void afterPlanStep(){
+		String event = planEvent();
+		if (event != null || planStarted >= planSteps.size()) {
+			planStop = planStarted >= planSteps.size() ? null : event; //마지막 명령 뒤의 사건은 버린 명령이 없으므로 이유에만 남는다
+			finishPlan();
+			return;
+		}
+		final String runId = activeRunId;
+		final int seq = planSeq, at = stateSeq;
+		JsonValue body = object();
+		body.addChild("run_id", new JsonValue(runId));
+		body.addChild("seq", new JsonValue(stateSeq));
+		body.addChild("plan_seq", new JsonValue(seq));
+		body.addChild("next", new JsonValue(planStarted + 1));
+		post("/api/bridge/command", body, SHORT_TIMEOUT, new Listener() {
+			@Override
+			public void onResult(JsonValue result) {
+				if (!runId.equals(activeRunId) || !planActive || planSeq != seq) return;
+				if (result == null || !result.getBoolean("continue", false)) {
+					planStop = result == null ? "no_answer" : result.getString("why", "stopped");
+					finishPlan();
+					return;
+				}
+				runPlanStep(at);
+			}
+		});
+	}
+
+	//명령 하나가 끝난 뒤의 사건 (A-6-7). 비교 기준은 묶음 직전에 보낸 상태(prevDepth·prevEnemies)와 이 명령 직전 체력
+	//죽음은 주인공이 기다리지 않으므로 여기 오지 않는다 (⑦ 살아 있음 신호로 Python이 안다)
+	private static String planEvent(){
+		Hero hero = Dungeon.hero;
+		if (Dungeon.depth != prevDepth) return "level_changed";
+		if (GameScene.interfaceBlockingHero()) return "window";
+		int bosses;
+		synchronized (bossesSlain) { bosses = bossesSlain.size(); }
+		if (doorPassed != planDoor || bosses != planBosses) return "goal"; //최종 목표 판정은 Python이 상태(⑧)로 한다
+		for (Integer id : visibleEnemies()) {
+			if (!prevEnemies.contains(id)) return "interrupted_enemy";
+		}
+		if (hero.HP < planHP) return "damaged"; //이 명령 동안 체력이 조금이라도 줄었다
+		return null;
+	}
+
+	//묶음 끝: last_command에 묶음 결과를 담아 상태를 보낸다
+	private static void finishPlan(){
+		planActive = false;
+		JsonValue cmd = object();
+		cmd.addChild("seq", new JsonValue(planSeq));
+		cmd.addChild("name", new JsonValue("plan"));
+		JsonValue list = GameState.array();
+		for (PlanStep s : planSteps) {
+			JsonValue one = object();
+			one.addChild("name", new JsonValue(s.name));
+			JsonValue a = object();
+			if (s.x != Integer.MIN_VALUE) a.addChild("x", new JsonValue(s.x));
+			if (s.y != Integer.MIN_VALUE) a.addChild("y", new JsonValue(s.y));
+			if (s.name.equals("rest")) a.addChild("until", new JsonValue(s.until));
+			one.addChild("args", a);
+			list.addChild(one);
+		}
+		cmd.addChild("commands", list);
+		cmd.addChild("started", new JsonValue(planStarted));
+		cmd.addChild("stop", planStop != null ? new JsonValue(planStop) : new JsonValue(JsonValue.ValueType.nullValue));
+		if (planRejected != null) cmd.addChild("rejected", new JsonValue(planRejected));
+		cmd.addChild("outcome", new JsonValue(planStarted > 0 ? "ok" : planRejected != null ? planRejected : "error"));
+		lastCommand = cmd;
+		if (planStarted == 0) {
+			sendState(true); //하나도 실행하지 않음: 주인공은 같은 대기 그대로 (명령 하나를 실행하지 않을 때와 같음)
+		} else {
+			sendState(false, "rejected".equals(planStop));
 		}
 	}
 

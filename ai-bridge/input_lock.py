@@ -6,7 +6,8 @@ AI의 키·클릭(pyautogui = Windows SendInput)은 Windows가 "프로그램이 
 - 키보드: 게임 창이 맨 앞일 때만 막는다 (다른 창에서 힌트를 칠 수 있음)
 
 AI 작업과 따로 돌도록 별도 프로세스로 실행한다. 훅 처리가 늦으면 Windows가 훅을 말없이 빼기 때문이다.
-풀리는 경우: 부모가 terminate() / 부모 프로세스가 죽음 / 게임 창이 사라짐 / 비상 해제 F12 (어느 창에서 눌러도 됨).
+풀리는 경우: 부모가 terminate() / 부모 프로세스가 죽음 / 게임 창이 사라짐 / 비상 해제 F12 (게임 창이 맨 앞일 때만.
+다른 프로그램의 F12는 가로채지 않는다, A-6-6).
 프로세스가 어떻게 끝나든 Windows가 훅을 자동으로 뺀다.
 
 단독 실행: python input_lock.py --hwnd <창 번호> --parent <부모 PID>
@@ -154,7 +155,8 @@ def run_lock(hwnd, parent_pid):
             info = ctypes.cast(lparam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
             if not info.flags & LLKHF_INJECTED:
                 # 비상 해제는 키 하나로 한다. 조합키는 Ctrl·Shift가 먼저 막혀서 눌린 상태를 알 수 없다
-                if wparam in KEY_DOWN and info.vkCode == VK_F12:
+                # 게임 창이 맨 앞일 때만 받는다. 다른 프로그램에서 누른 F12는 그 프로그램으로 그대로 간다 (A-6-6)
+                if wparam in KEY_DOWN and info.vkCode == VK_F12 and user32.GetForegroundWindow() == hwnd.value:
                     unlocked[0] = True  # 이 순간부터 아무것도 막지 않는다
                     return 1
                 if info.vkCode == VK_F9:

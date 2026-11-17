@@ -33,6 +33,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LOGS_DIR = os.path.join(HERE, "logs")
 GUIDE_PATH = os.path.join(HERE, "guide.md")
 
+# 게임 창 제목 = build.gradle의 appName (desktop이 Specification-Title로 창 제목에 씀).
+# 앱 이름을 바꾸면 여기 한 곳만 같이 고친다 (window_layout.py도 이 값을 가져다 씀)
 GAME_WINDOW_TITLE = "Shattered Pixel Dungeon"
 AI_IMAGE_SIZE = (360, 640)  # AI에게 보내는 이미지 크기. 게임 창이 더 크면 줄여서 보낸다
 # 게임 창 크기 (DesktopLauncher.java의 AI_WINDOW_PRESETS와 같은 값). 모두 시야 180x320을 배율 4/3/2로 그린다
@@ -58,7 +60,7 @@ MILESTONES = [
 MILESTONE_MAX = sum(points for _, _, points in MILESTONES)
 BASIS_VALUES = ["화면", "기록", "추측"]
 WAIT_AFTER_ACTION = 0.6  # 행동 후 화면이 바뀔 때까지 기다리는 시간(초)
-FOCUS_RETRIES = 3  # 게임 창을 맨 앞으로 가져오기 시도 횟수 (판 시작 때 한 번, 사람이 누른 [게임 창 앞으로])
+FOCUS_RETRIES = 3  # 게임 창을 맨 앞으로 가져와 달라는 요청 횟수 (판 시작·재개 ▶·[게임 창 앞으로]처럼 사람이 누른 때만)
 FOCUS_WAIT_INTERVAL = 0.3  # 키·클릭 판단에서 게임 창이 맨 앞이 되기를 기다리며 다시 보는 간격(초). 시간 제한 없음 (A-6-6)
 CAPTURE_RETRY = 1.0  # 최소화·검은 화면이라 못 찍을 때 다시 찍는 간격(초). 시간 제한 없음 (A-6-6)
 RENDER_FRESH = 1.5  # 찍기 직전 살아 있음 신호가 이 시간(초) 안에 와 있어야 찍는다 (게임이 지금 그리고 있다는 뜻)
@@ -150,13 +152,13 @@ GAME_DATA_RULES = """[게임 정보 읽는 법]
 - [게임 정보]의 "주변 8칸"은 내 바로 옆 칸이 무엇인지와 그 칸으로 가는 키다. 지도와 같은 내용이니, 바로 옆 칸은 지도 글자를 세지 말고 이 줄로 확인한다.
 - [게임 정보]·[지도]에서 본 것도 basis는 "화면"으로 적는다."""
 GAME_DATA_NONE = "[게임 정보] 이번 판단에는 없음 (화면만 보고 판단)"
-# 게임 명령 (A-6-5, game-state.md 3장): 게임에서 시작한 판에만 규칙 [조작법] 끝에 붙이고 도구에 더한다
+# 게임 명령 (A-6-5, game-state.md 3장): 게임에서 시작한 판에만 규칙 [조작법] 맨 앞(키 설명 앞)에 넣고 도구에 더한다
 COMMAND_RULES = """- 이동·공격·줍기·계단·쉬기·탐색은 명령을 쓴다. 키·클릭은 창을 닫거나 명령으로 안 되는 것에만 쓴다
-- 게임 명령 도구도 쓸 수 있다: move_to(x,y) 그 칸까지 가기, attack(x,y) 그 칸의 적 공격, pick_up(x,y, 비우면 발밑) 줍기·상자 열기, take_stairs(x,y) 계단 타기, rest(turn 한 턴 / full 체력이 찰 때까지) 쉬기, search 주변 탐색
+- 게임 명령 도구: move_to(x,y) 그 칸까지 가기, attack(x,y) 그 칸의 적 공격, pick_up(x,y, 비우면 발밑) 줍기·상자 열기, take_stairs(x,y) 계단 타기, rest(turn 한 턴 / full 체력이 찰 때까지) 쉬기, search 주변 탐색
 - 명령의 좌표는 [게임 정보]·[지도]의 좌표다. 가 본 적 없는 칸(지도의 빈칸)으로는 못 간다
 - move_to는 도착하거나 새 적이 보이면 멈춘다. 명령 한 번에 여러 턴이 지날 수 있다
 - 명령을 실행하지 못하면 다음 [게임 정보]에 이유가 나온다"""
-RULES_VERSION = 2  # 게임 판 규칙 글 버전. 2: COMMAND_RULES 맨 앞에 "명령을 먼저 쓴다" (A-6-6)
+RULES_VERSION = 2  # 게임 판 규칙 글 버전. 2: 명령 설명을 키 설명 앞으로 + "명령을 먼저 쓴다" 한 줄 (A-6-6)
 COMMAND_STATE_WAIT = 30  # 명령을 낸 뒤 새 상태(seq가 더 큼)를 기다리는 최대 시간(초). 긴 이동·쉬기
 COMMAND_SHOT_DELAY = 0.3  # 새 상태를 받은 뒤 화면을 찍기까지 (걷는 그림·숫자가 잦아들게)
 COMMAND_OUTCOMES = {  # 게임이 명령을 실행하지 않은 이유 (game-state.md 3-2)
@@ -574,24 +576,18 @@ class WindowsGame:
         return origin.x, origin.y, origin.x + rect.right, origin.y + rect.bottom
 
     def focus(self):
-        """게임 창을 맨 앞으로 가져온다. 정말 맨 앞에 왔으면 True.
-        Windows는 뒤에 있는 프로그램이 창을 앞으로 가져오는 것을 자주 막아서, 막히면 방법을 바꿔 다시 시도한다."""
+        """게임 창을 맨 앞으로 가져와 달라고 Windows에 요청한다. 정말 맨 앞에 왔으면 True.
+        판 시작(던전 도착)·재개(▶)·[게임 창 앞으로]처럼 사람이 막 무언가를 누른 때만 부른다.
+        A-6-6: Alt 키 흉내와 AttachThreadInput은 쓰지 않는다 (다른 프로그램에 입력이 들어갈 수 있어서).
+        Windows가 거절하면 맨 앞으로 오지 않는다. 그러면 키·클릭 판단은 사람이 게임 창을 누를 때까지 기다린다."""
         u = self.user32
         if u.IsIconic(self.hwnd):
-            u.ShowWindow(self.hwnd, 9)  # 최소화돼 있으면 복원
-        for attempt in range(FOCUS_RETRIES):
+            u.ShowWindow(self.hwnd, 9)  # 사람이 누른 때만 부르므로, 최소화돼 있으면 복원한다
+        for _ in range(FOCUS_RETRIES):
             if u.GetForegroundWindow() == self.hwnd:
                 return True
-            if attempt > 0:  # Alt 키를 한 번 눌렀다 떼면 창 전환이 허용된다
-                u.keybd_event(0x12, 0, 0, 0)
-                u.keybd_event(0x12, 0, 2, 0)
-            # 지금 맨 앞 창의 입력 흐름에 잠깐 붙어서 전환 허락을 얻는다
-            fg_thread = u.GetWindowThreadProcessId(u.GetForegroundWindow(), None)
-            my_thread = self.ctypes.windll.kernel32.GetCurrentThreadId()
-            u.AttachThreadInput(my_thread, fg_thread, True)
             u.BringWindowToTop(self.hwnd)
             u.SetForegroundWindow(self.hwnd)
-            u.AttachThreadInput(my_thread, fg_thread, False)
             time.sleep(0.15)
         return u.GetForegroundWindow() == self.hwnd
 
@@ -810,7 +806,7 @@ class Agent:
         self.config["ai_input"] = "screen_data" if game_run else "screen"
         if game_run:  # 게임 데이터 글 버전 (이 칸이 없는 screen_data 기록은 1)
             self.config["game_data_version"] = GAME_DATA_VERSION
-        if game_run:  # 규칙 글 버전 (A-6-6: [조작법]에 "명령을 먼저 쓴다" 한 줄). 이 칸이 없는 게임 판은 1
+        if game_run:  # 규칙 글 버전 (A-6-6: 명령 설명을 키 앞으로 + "명령을 먼저 쓴다"). 이 칸이 없는 게임 판은 1
             self.config["rules_version"] = RULES_VERSION
         # 준 도구 묶음 (A-6-5). 게임에서 시작한 판은 키·클릭 + 게임 명령 6개. 이 칸이 없는 옛 기록은 keys_click
         self.config["tool_set"] = "keys_click_commands" if game_run else "keys_click"
@@ -1304,9 +1300,8 @@ class Agent:
         goal = self.custom_goal()
         if goal:  # 기본 목표 문장만 바꾼다
             system = system.replace(f"[최종 목표] {DEFAULT_GOAL}.", f"[최종 목표] {goal}.")
-        if self._watch_game:  # 게임에서 시작한 판은 [조작법]에 명령 설명, 판단마다 [게임 정보]·[지도]도 받는다
-            last_rule = "- 키 하나를 누를 때마다 한 턴이 지나고, 그동안 적도 움직인다"
-            system = system.replace(last_rule, last_rule + "\n" + COMMAND_RULES, 1)
+        if self._watch_game:  # 게임에서 시작한 판은 [조작법] 맨 앞에 명령 설명, 판단마다 [게임 정보]·[지도]도 받는다
+            system = system.replace("[조작법]\n", "[조작법]\n" + COMMAND_RULES + "\n", 1)
             system += "\n\n" + GAME_DATA_RULES
         if self.config.get("started_from") == "game":  # 화면에 보이는 직업·제약 이름만. 시드는 넣지 않는다
             system += "\n\n[이번 판]\n직업: " + (self.config.get("hero_title") or self.config.get("hero_class") or "?")
@@ -1337,8 +1332,8 @@ class Agent:
             game.on_wait = lambda: self._check_game_waiting(game)  # 화면을 못 찍어 기다리는 동안 (A-6-6)
             self.game = game
             if hasattr(game, "focus"):
-                # 판 시작 때 한 번만 게임 창을 맨 앞으로 (게임 판은 던전 도착 뒤, mvp 판은 시작할 때).
-                # 그 뒤로는 앞으로 가져오지 않는다 (A-6-6). 실패해도 키를 보내기 전에 맨 앞인지 다시 확인한다
+                # 판 시작 때 한 번 게임 창을 맨 앞으로 (게임 판은 던전 도착 뒤, mvp 판은 시작할 때).
+                # 그 뒤로는 재개(▶) 때만 가져온다 (A-6-6). 실패해도 키를 보내기 전에 맨 앞인지 다시 확인한다
                 game.focus()
             if self.input_lock is not None:  # 실패해도 판은 진행한다 (관찰 화면에 🔓와 이유가 보임)
                 self.input_lock.start(game.hwnd)
@@ -1537,7 +1532,7 @@ class Agent:
             self._stop.wait(0.2)
 
     def _wait_while_paused(self, game):
-        """일시정지 동안 기다린다. 재개하면 입력 잠금을 다시 건다 (게임 창은 앞으로 가져오지 않음, A-6-6).
+        """일시정지 동안 기다린다. 재개하면 게임 창을 한 번 앞으로 가져오고 입력 잠금을 다시 건다.
         멈춘 시간은 config.json의 pauses에 남긴다 (그동안 사람이 조작했을 수 있으므로)."""
         if not self._paused.is_set():
             return
@@ -1553,7 +1548,9 @@ class Agent:
             self._save_config()
         if self._stop.is_set():
             return
-        if self.input_lock is not None:  # 게임 창은 앞으로 가져오지 않는다 (A-6-6). 키 판단이면 사람이 누를 때까지 기다린다
+        if hasattr(game, "focus"):  # 재개(▶)는 사람이 직접 누른 순간이라 한 번 앞으로 가져온다 (A-6-6)
+            game.focus()
+        if self.input_lock is not None:
             self.input_lock.start(game.hwnd)
 
     def _wait_for_goal_choice(self, game):

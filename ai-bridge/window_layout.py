@@ -12,11 +12,10 @@ import threading
 import time
 import webbrowser
 
-from agent import DISPLAY_PRESETS
+from agent import DISPLAY_PRESETS, GAME_WINDOW_TITLE  # 게임 창 제목은 agent.py 한 곳에서 관리
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROFILE_DIR = os.path.join(HERE, ".app-profile")  # 앱 창 전용 브라우저 프로필 (GitHub에 올리지 않음)
-GAME_WINDOW_TITLE = "Shattered Pixel Dungeon"
 PANEL_TITLE = "관찰 패널 · 녹픽셀"  # web/panel.html의 <title>
 TITLE_BAR = 40  # 게임 창 제목 표시줄 높이 어림값 (게임 창을 못 찾았을 때 비워 둘 자리 계산용)
 BROWSERS = [

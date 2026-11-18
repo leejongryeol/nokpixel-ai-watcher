@@ -212,7 +212,7 @@ Python은 `Agent`를 만들어 두기만 하고 **아직 시작하지 않는다*
 - Python은 `logs/<판>/states/<seq>.json`에 저장하고 이정표를 판정한다. A-6-3(11/14)부터 `ai` 칸을 다음 판단의 AI 입력 [게임 정보]·[지도] 글로도 쓴다. `record`는 이정표와 최종 목표 달성 판정(A-6-4의 `door_passed`·`bosses_slain`)에만 쓰고 AI 입력에는 넣지 않는다.
 - 거절: 진행 중 판과 `run_id`가 다르면 `not_running`(409), `seq`·`ai`·`record`가 이상하면 `bad_state`(400), 1MB가 넘으면 `too_large`(413).
 - `want_command`: 게임에서 시작한 판이면 `true` (A-6-5, 11/15). 게임은 이때 ⑨로 명령을 묻는다.
-- `last_command`: 바로 앞 ⑨ 명령과 결과 `{"seq", "name", "args", "outcome"}`, 없으면 `null`. 명령을 실행하지 않았으면 `reasons`는 `["rejected"]`.
+- `last_command`: 바로 앞 ⑨ 명령과 결과 `{"seq", "name", "args", "outcome"}`, 없으면 `null`. 명령을 실행하지 않았으면 `reasons`는 `["rejected"]`. 명령 묶음이면 `{"seq", "name": "plan", "commands", "started", "stop", "rejected", "outcome"}` (A-6-7, [game-state.md](game-state.md) 3-5).
 
 **⑨ 명령 받기** `POST /api/bridge/command` (게임 → Python, A-6-5. 자세한 것: [game-state.md](game-state.md) 11장)
 ```json
@@ -220,6 +220,7 @@ Python은 `Agent`를 만들어 두기만 하고 **아직 시작하지 않는다*
 응답 {"command": null}  또는  {"command": {"seq": 12, "name": "move_to", "args": {"x": 20, "y": 9}}}
 ```
 - 주인공이 입력을 기다리는 동안 0.5초마다, 앞 요청이 돌아온 뒤에만. Python은 넘긴 명령을 지우고, 일시정지·중지·한도 도달·판 끝·달성 창(A-6-6) 중에는 `null`. 진행 중 판이 아니면 409.
+- 명령 묶음 (A-6-7): 명령이 `{"seq", "name": "plan", "args": {}, "commands": [{"name", "args"}…]}`(1~5개)일 수 있다. 묶음 중에는 게임이 다음 명령 전에 `{"run_id", "seq", "plan_seq", "next"}`로 묻고, Python은 `{"command": null, "continue": true}` 또는 `{"continue": false, "why": "paused"}`처럼 답한다 (`why`: `paused`·`stopped`·`goal_wait`·`ended`·`not_current`). 진행 중 판이 아니면 409와 `continue: false, why: ended`.
 
 **⑩ 달성 창 선택** `POST /api/bridge/goal_choice` (게임 → Python, A-6-6)
 ```json
